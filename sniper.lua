@@ -1,8 +1,8 @@
 -- ============================================================
--- PHI AUTOTYPER  v11  (mini)
+-- PHI AUTOTYPER  v12  (mini)
 -- One compact panel. Custom-code entry + monitor sniper on a
 -- rebindable key. Settings: keybind, auto-type, auto-redeem,
--- and case detection (UPPER / lower / BOTH).
+-- case (UPPER/lower/BOTH) and WORDS (stitch 1/2/3 announced words).
 -- Remote names are hashed & rotate, so the announcement remote is
 -- found by payload SHAPE (not name); the redeem remote is found by
 -- name or learned on first manual use. See "REMOTE DISCOVERY".
@@ -151,19 +151,12 @@ local headMask = mk("Frame", Head); headMask.Size = UDim2.new(1,0,0,12)
 headMask.Position = UDim2.new(0,0,1,-12); headMask.BackgroundColor3 = K.bg1
 headMask.BackgroundTransparency = 0.08; headMask.BorderSizePixel = 0; headMask.ZIndex = 11
 
--- marker dot (no logo image) — dim white, slightly transparent
+-- status dot (no logo image): grey = searching, green = remote locked
 local mark = mk("Frame", Head)
 mark.Size = UDim2.new(0, 10, 0, 10); mark.AnchorPoint = Vector2.new(0, 0.5)
-mark.Position = UDim2.new(0, 14, 0.5, 0); mark.BackgroundColor3 = K.acc
-mark.BackgroundTransparency = 0.25; mark.BorderSizePixel = 0; mark.ZIndex = 12
+mark.Position = UDim2.new(0, 14, 0.5, 0); mark.BackgroundColor3 = K.txt3
+mark.BorderSizePixel = 0; mark.ZIndex = 12
 corner(5, mark)
-task.spawn(function()
-    while mark and mark.Parent do
-        tw(mark, 1.1, {BackgroundTransparency = 0.55}, Enum.EasingStyle.Sine); task.wait(1.2)
-        if not (mark and mark.Parent) then break end
-        tw(mark, 1.1, {BackgroundTransparency = 0.2}, Enum.EasingStyle.Sine); task.wait(1.2)
-    end
-end)
 
 local title = label("PHI AUTOTYPER", 13, F.black, K.txt, nil, Head)
 title.Size = UDim2.new(1, -132, 1, 0); title.Position = UDim2.new(0, 32, 0, 0); title.ZIndex = 12
@@ -370,6 +363,8 @@ local seenAttempts    = {}
 local autoType        = true
 local autoRedeem      = true
 local caseMode        = "UPPER"   -- "UPPER" | "lower" | "BOTH"
+local wordCount       = 1         -- how many announced words form one code (1/2/3)
+local recentWords     = {}        -- rolling buffer of the last few announced words
 local bindKey         = Enum.KeyCode.F
 local rebinding       = false
 
@@ -411,7 +406,7 @@ local function snipe(rawCode)
 end
 
 -- ══ SETTINGS PANEL ═══════════════════════════════════════════════
-local SW, SH = 218, 244
+local SW, SH = 220, 228
 local Settings = mk("Frame", SG); Settings.Name = "Settings"
 Settings.Size = UDim2.new(0, SW, 0, SH)
 Settings.Position = UDim2.new(1, -PW - 24 - SW - 12, 0.5, -SH/2)
@@ -494,39 +489,39 @@ end
 makeToggleRow(34, "AUTO TYPE",   autoType,   function(v) autoType = v end)
 makeToggleRow(68, "AUTO REDEEM", autoRedeem, function(v) autoRedeem = v end)
 
--- case segmented row
-local caseRow = rowFrame(102, 30)
-local caseLbl = label("CASE", 10, F.bold, K.txt2, nil, caseRow)
-caseLbl.Size = UDim2.new(0, 44, 1, 0); caseLbl.Position = UDim2.new(0, 10, 0, 0); caseLbl.ZIndex = 23
-local segHost = mk("Frame", caseRow)
-segHost.AnchorPoint = Vector2.new(1, 0.5); segHost.Position = UDim2.new(1, -8, 0.5, 0)
-segHost.Size = UDim2.new(0, 132, 0, 20); segHost.BackgroundTransparency = 1; segHost.ZIndex = 23
-local segOpts = {"UPPER", "lower", "BOTH"}
-local segBtns = {}
-local function selectCase(mode)
-    caseMode = mode
-    for opt, btn in pairs(segBtns) do
-        local on = (opt == mode)
-        tw(btn, 0.12, {BackgroundColor3 = on and K.acc or K.bg3})
-        btn.TextColor3 = on and Color3.fromRGB(18,18,22) or K.txt2
+-- segmented row helper (used for CASE and WORDS)
+local function makeSegRow(y, labelText, opts, default, onChange)
+    local row = rowFrame(y, 30)
+    local lb = label(labelText, 10, F.bold, K.txt2, nil, row)
+    lb.Size = UDim2.new(0, 60, 1, 0); lb.Position = UDim2.new(0, 10, 0, 0); lb.ZIndex = 23
+    local host = mk("Frame", row)
+    host.AnchorPoint = Vector2.new(1, 0.5); host.Position = UDim2.new(1, -8, 0.5, 0)
+    host.Size = UDim2.new(0, 132, 0, 20); host.BackgroundTransparency = 1; host.ZIndex = 23
+    local btns, n = {}, #opts
+    local function sel(opt)
+        for o, b in pairs(btns) do
+            local on = (o == opt)
+            tw(b, 0.12, {BackgroundColor3 = on and K.acc or K.bg3})
+            b.TextColor3 = on and Color3.fromRGB(18,18,22) or K.txt2
+        end
+        if onChange then onChange(opt) end
     end
+    for i, opt in ipairs(opts) do
+        local b = mk("TextButton", host)
+        b.Size = UDim2.new(1/n, -3, 1, 0); b.Position = UDim2.new((i-1)/n, (i-1)*1.5, 0, 0)
+        b.BackgroundColor3 = K.bg3; b.BorderSizePixel = 0
+        b.Text = tostring(opt); b.Font = F.bold; b.TextSize = 9
+        b.TextColor3 = K.txt2; b.AutoButtonColor = false; b.ZIndex = 24
+        corner(5, b); btns[opt] = b
+        b.MouseButton1Click:Connect(function() sel(opt) end)
+    end
+    sel(default)
 end
-for i, opt in ipairs(segOpts) do
-    local b = mk("TextButton", segHost)
-    b.Size = UDim2.new(1/3, -3, 1, 0); b.Position = UDim2.new((i-1)/3, (i-1)*1.5, 0, 0)
-    b.BackgroundColor3 = K.bg3; b.BorderSizePixel = 0
-    b.Text = opt; b.Font = F.bold; b.TextSize = 9
-    b.TextColor3 = K.txt2; b.AutoButtonColor = false; b.ZIndex = 24
-    corner(5, b)
-    segBtns[opt] = b
-    b.MouseButton1Click:Connect(function() selectCase(opt) end)
-end
-selectCase(caseMode)
-
--- hint line
-local sHint = label("monitor types & redeems caught codes.", 8, F.med, K.txt3, nil, sBody)
-sHint.Size = UDim2.new(1, 0, 0, 24); sHint.Position = UDim2.new(0, 2, 0, 138)
-sHint.TextWrapped = true; sHint.TextYAlignment = Enum.TextYAlignment.Top; sHint.ZIndex = 22
+makeSegRow(102, "CASE",  {"UPPER", "lower", "BOTH"}, caseMode, function(o) caseMode = o end)
+makeSegRow(136, "WORDS", {"1", "2", "3"}, tostring(wordCount), function(o)
+    wordCount = tonumber(o) or 1
+    recentWords = {}            -- reset the word buffer when the setting changes
+end)
 
 -- gear opens settings beside Main
 gear.MouseButton1Click:Connect(function()
@@ -556,19 +551,20 @@ fHeadMask.Position = UDim2.new(0,0,1,-10); fHeadMask.BackgroundColor3 = K.bg1
 fHeadMask.BackgroundTransparency = 0.08; fHeadMask.BorderSizePixel = 0; fHeadMask.ZIndex = 21
 local fLiveDot = mk("Frame", fHead)
 fLiveDot.Size = UDim2.new(0, 7, 0, 7); fLiveDot.AnchorPoint = Vector2.new(0, 0.5)
-fLiveDot.Position = UDim2.new(0, 12, 0.5, 0); fLiveDot.BackgroundColor3 = K.err
+fLiveDot.Position = UDim2.new(0, 12, 0.5, 0); fLiveDot.BackgroundColor3 = K.txt3
 fLiveDot.BorderSizePixel = 0; fLiveDot.ZIndex = 22; corner(50, fLiveDot)
-task.spawn(function()
-    while fLiveDot and fLiveDot.Parent do
-        tw(fLiveDot, 0.7, {BackgroundTransparency = 0.6}); task.wait(0.8)
-        if not (fLiveDot and fLiveDot.Parent) then break end
-        tw(fLiveDot, 0.7, {BackgroundTransparency = 0}); task.wait(0.8)
-    end
-end)
 local fTitle = label("LIVE FEED", 11, F.black, K.txt, nil, fHead)
-fTitle.Size = UDim2.new(1, -110, 1, 0); fTitle.Position = UDim2.new(0, 26, 0, 0); fTitle.ZIndex = 22
-local fCountLbl = label("0", 9, F.bold, K.txt3, Enum.TextXAlignment.Right, fHead)
-fCountLbl.Size = UDim2.new(0, 50, 1, 0); fCountLbl.Position = UDim2.new(1, -64, 0, 0); fCountLbl.ZIndex = 22
+fTitle.Size = UDim2.new(0, 100, 1, 0); fTitle.Position = UDim2.new(0, 26, 0, 0); fTitle.ZIndex = 22
+local fCountLbl = label("0 caught", 9, F.bold, K.txt3, Enum.TextXAlignment.Right, fHead)
+fCountLbl.Size = UDim2.new(0, 60, 1, 0); fCountLbl.Position = UDim2.new(1, -146, 0, 0); fCountLbl.ZIndex = 22
+local fClear = mk("TextButton", fHead)
+fClear.Size = UDim2.new(0, 44, 0, 18); fClear.AnchorPoint = Vector2.new(1, 0.5)
+fClear.Position = UDim2.new(1, -34, 0.5, 0); fClear.BackgroundColor3 = K.bg3
+fClear.Text = "CLEAR"; fClear.TextColor3 = K.txt2; fClear.Font = F.bold; fClear.TextSize = 8
+fClear.BorderSizePixel = 0; fClear.AutoButtonColor = false; fClear.ZIndex = 23
+corner(5, fClear); stroke(fClear, K.bdr, 1, 0.2)
+fClear.MouseEnter:Connect(function() tw(fClear, 0.1, {BackgroundColor3 = K.bg4, TextColor3 = K.accHov}) end)
+fClear.MouseLeave:Connect(function() tw(fClear, 0.1, {BackgroundColor3 = K.bg3, TextColor3 = K.txt2}) end)
 local fClose = mk("TextButton", fHead)
 fClose.Size = UDim2.new(0, 20, 0, 20); fClose.AnchorPoint = Vector2.new(1, 0.5)
 fClose.Position = UDim2.new(1, -8, 0.5, 0); fClose.BackgroundColor3 = K.bg3
@@ -598,13 +594,13 @@ local feedCards, feedOrder, MAX_FEED = {}, 0, 40
 local function addFeedEntry(text, code)
     if fEmpty then fEmpty:Destroy(); fEmpty = nil end
     feedOrder += 1
-    fCountLbl.Text = tostring(feedOrder)
+    fCountLbl.Text = feedOrder .. " caught"
 
     local card = mk("Frame", feedScroll)
     card.Size = UDim2.new(1, 0, 0, 0); card.AutomaticSize = Enum.AutomaticSize.Y
     card.BackgroundColor3 = K.bg3; card.BackgroundTransparency = 0.05
     card.BorderSizePixel = 0; card.LayoutOrder = -feedOrder; card.ZIndex = 22
-    corner(8, card); stroke(card, K.line, 1, 0.3)
+    corner(8, card); stroke(card, code and K.bdr or K.line, 1, code and 0.1 or 0.4)
     local cpad = mk("UIPadding", card)
     cpad.PaddingTop = UDim.new(0,8); cpad.PaddingBottom = UDim.new(0,8)
     cpad.PaddingLeft = UDim.new(0,9); cpad.PaddingRight = UDim.new(0,9)
@@ -665,6 +661,15 @@ local function addFeedEntry(text, code)
     end
 end
 
+fClear.MouseButton1Click:Connect(function()
+    for _, c in ipairs(feedCards) do c:Destroy() end
+    feedCards = {}; feedOrder = 0; fCountLbl.Text = "0 caught"
+    if not fEmpty then
+        fEmpty = label("waiting for announcements…", 10, F.med, K.txt3, Enum.TextXAlignment.Center, feedScroll)
+        fEmpty.Size = UDim2.new(1, 0, 0, 40); fEmpty.LayoutOrder = 999; fEmpty.ZIndex = 22
+    end
+end)
+
 -- feed button opens the feed beside Main
 feedBtn.MouseButton1Click:Connect(function()
     if FeedWin.Visible then FeedWin.Visible = false; return end
@@ -700,21 +705,57 @@ local function flashCatch()
     end)
 end
 
+-- representative word of one announcement: a code-shaped token if present,
+-- else the longest real word (so "John" / "Pork" get captured for stitching).
+local MIN_FRAG_LEN = 3
+local function extractWord(stripped)
+    local tokens = tokenize(stripped)
+    for _, t in ipairs(tokens) do
+        if isCandidate(t) then return t end
+    end
+    local best
+    for _, t in ipairs(tokens) do
+        if #t >= MIN_FRAG_LEN and not BORING[t:upper()] then
+            if not best or #t > #best then best = t end
+        end
+    end
+    return best
+end
+
 local function handleAnnouncement(source, text, ...)
     local stripped = stripRich(tostring(text or "")); if stripped == "" then return end
-    local found
+
+    -- a single code-shaped token (used directly in 1-word mode)
+    local codeTok
     for _, tok in ipairs(tokenize(stripped)) do
-        if isCandidate(tok) then found = tok; break end
+        if isCandidate(tok) then codeTok = tok; break end
     end
-    addFeedEntry(stripped, found)            -- live feed: log every announcement
-    if not found then return end
-    lastCapturedCode = found
+    -- buffer one representative word per announcement (for stitching)
+    local word = extractWord(stripped)
+    if word then
+        table.insert(recentWords, word)
+        while #recentWords > 3 do table.remove(recentWords, 1) end
+    end
+
+    -- build the candidate from the WORDS setting
+    local candidate
+    if wordCount <= 1 then
+        candidate = codeTok                        -- only real codes in 1-word mode
+    elseif #recentWords >= wordCount then
+        local parts = {}                           -- stitch the last N announced words
+        for i = #recentWords - wordCount + 1, #recentWords do parts[#parts + 1] = recentWords[i] end
+        candidate = table.concat(parts)
+    end
+
+    addFeedEntry(stripped, candidate)              -- live feed: every announcement
+    if not candidate then return end
+    lastCapturedCode = candidate
     flashCatch()
     if monitorOn then
-        snipe(found)
+        snipe(candidate)
     else
-        if getCustomCode() == "" then CodeBox.Text = found end  -- show it (only if box is empty)
-        setCStatus("caught " .. found .. " — press " .. bindKey.Name, "wait")
+        if getCustomCode() == "" then CodeBox.Text = candidate end
+        setCStatus("caught " .. candidate .. " — press " .. bindKey.Name, "wait")
     end
 end
 
@@ -765,6 +806,8 @@ local function hookEvent(re)
         if looksLikeAnnouncement(...) then
             if not NotifyRemote then
                 NotifyRemote = re
+                mark.BackgroundColor3 = K.ok            -- header dot: green = locked
+                fLiveDot.BackgroundColor3 = K.ok        -- feed dot: green = live
                 print("[Phi] Notify locked ->", re.Name)
                 print("[Phi] PROOF payload:", dumpArgs(...))  -- eyeball: is this a real announcement?
             end
@@ -799,6 +842,6 @@ if not RedeemRemote and hookmetamethod and getnamecallmethod then
     end)
 end
 
-setCStatus(("listening on %d remotes…"):format(hooked), "idle")
-print(("[Phi] v11 ready — watching %d RemoteEvents, redeem=%s")
-    :format(hooked, RedeemRemote and RedeemRemote.Name or "learn-on-use"))
+setCStatus("waiting for an announcement…", "idle")
+print(("[Phi] v12 ready — redeem=%s. Searching for the announcement remote.")
+    :format(RedeemRemote and RedeemRemote.Name or "learn-on-use"))
