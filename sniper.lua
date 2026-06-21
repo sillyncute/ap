@@ -536,6 +536,14 @@ UserInputService.InputBegan:Connect(function(input, gpe)
 end)
 
 -- ── Announcement handler ─────────────────────────────────────────
+local function flashCatch()
+    tw(cStatus, 0.06, {BackgroundColor3 = K.acc, BackgroundTransparency = 0.45})
+    tw(cStatusDot, 0.06, {BackgroundColor3 = K.acc})
+    task.delay(0.14, function()
+        tw(cStatus, 0.35, {BackgroundColor3 = K.bg2, BackgroundTransparency = 0.08})
+    end)
+end
+
 local function handleAnnouncement(source, text, ...)
     local stripped = stripRich(tostring(text or "")); if stripped == "" then return end
     local found
@@ -544,9 +552,11 @@ local function handleAnnouncement(source, text, ...)
     end
     if not found then return end
     lastCapturedCode = found
+    flashCatch()
     if monitorOn then
         snipe(found)
     else
+        if getCustomCode() == "" then CodeBox.Text = found end  -- show it (only if box is empty)
         setCStatus("caught " .. found .. " — press " .. bindKey.Name, "wait")
     end
 end
