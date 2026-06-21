@@ -561,16 +561,15 @@ local POSITIONS = { Top=true, Bottom=true, Center=true, Centre=true, Middle=true
 local function looksLikeAnnouncement(...)
     local a = table.pack(...)
     if a.n == 0 or typeof(a[1]) ~= "string" or #a[1] < 3 then return false end
+    local hasSound, hasPos = false, false
     for i = 2, a.n do
         local v = a[i]
         if typeof(v) == "string" then
-            if v:find("Sounds%.") or v:find("rbxassetid") then return true end -- sound path/id
-            if POSITIONS[v] then return true end                               -- screen position
+            if v:find("Sounds%.") or v:find("rbxassetid") then hasSound = true end -- sound path/id
+            if POSITIONS[v] then hasPos = true end                                 -- screen position
         end
     end
-    -- fallback: the (string, number, string, string, number) shape
-    return typeof(a[2]) == "number" and typeof(a[3]) == "string"
-       and typeof(a[4]) == "string" and typeof(a[5]) == "number"
+    return hasSound or hasPos
 end
 
 local function gather(root)
@@ -586,8 +585,9 @@ local remoteEvents, remoteFns = gather(Net)
 local hooked = 0
 local function hookEvent(re)
     re.OnClientEvent:Connect(function(...)
+        if NotifyRemote and NotifyRemote ~= re then return end  -- stick to the locked remote
         if looksLikeAnnouncement(...) then
-            if NotifyRemote ~= re then
+            if not NotifyRemote then
                 NotifyRemote = re
                 print("[Phi] Notify locked ->", re.Name)
             end
