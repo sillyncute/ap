@@ -1,10 +1,11 @@
 -- ============================================================
--- PHI AUTOTYPER  v10  (mini)
+-- PHI AUTOTYPER  v11  (mini)
 -- One compact panel. Custom-code entry + monitor sniper on a
 -- rebindable key. Settings: keybind, auto-type, auto-redeem,
 -- and case detection (UPPER / lower / BOTH).
--- Listens to NotificationService/Notify (RE) and
--- AdminService/Announce (RF/RE).
+-- Remote names are hashed & rotate, so the announcement remote is
+-- found by payload SHAPE (not name); the redeem remote is found by
+-- name or learned on first manual use. See "REMOTE DISCOVERY".
 -- ============================================================
 
 local Players          = game:GetService("Players")
@@ -16,25 +17,11 @@ local Player = Players.LocalPlayer
 local PG  = Player:WaitForChild("PlayerGui")
 local Net = ReplicatedStorage:WaitForChild("Packages"):WaitForChild("Net")
 
--- ── marker-based remote finder ───────────────────────────────────
-local function findRemoteByMarker(markerName, expectedClass)
-    local children = Net:GetChildren()
-    for i = 1, #children - 1 do
-        if children[i].Name == markerName then
-            local r = children[i + 1]
-            if r and r:IsA(expectedClass) then return r end
-        end
-    end
-end
-
-local NotifyRemote   = findRemoteByMarker("RE/NotificationService/Notify", "RemoteEvent")
-local AnnounceRemote = findRemoteByMarker("RF/AdminService/Announce", "RemoteFunction")
-    or findRemoteByMarker("RF/AdminService/Announce", "RemoteEvent")
-local RedeemRemote   = findRemoteByMarker("RF/RequestRedemption", "RemoteFunction")
-
-print("[Phi] Notify:",  NotifyRemote   and NotifyRemote.Name   or "MISSING")
-print("[Phi] Announce:", AnnounceRemote and AnnounceRemote.Name or "MISSING")
-print("[Phi] Redeem:",  RedeemRemote   and RedeemRemote.Name   or "MISSING")
+-- ── Remotes ──────────────────────────────────────────────────────
+-- The game hashes & rotates remote names (e.g. RE/<64 hex chars>),
+-- so we never hardcode a name. They are resolved by payload SHAPE in
+-- the "REMOTE DISCOVERY" section near the bottom of this script.
+local NotifyRemote, RedeemRemote = nil, nil
 
 -- ── Config ───────────────────────────────────────────────────────
 local MIN_WORD_LEN, MAX_WORD_LEN = 4, 30
@@ -564,23 +551,77 @@ local function handleAnnouncement(source, text, ...)
     end
 end
 
-if NotifyRemote then
-    NotifyRemote.OnClientEvent:Connect(function(text, ...) handleAnnouncement("NOTIFY", text, ...) end)
-    print("[Phi] Notify hooked")
-end
-if AnnounceRemote then
-    if AnnounceRemote:IsA("RemoteEvent") then
-        AnnounceRemote.OnClientEvent:Connect(function(text, ...) handleAnnouncement("ADMIN", text, ...) end)
-        print("[Phi] Announce hooked via OnClientEvent")
-    elseif AnnounceRemote:IsA("RemoteFunction") then
-        local okSet = pcall(function()
-            AnnounceRemote.OnClientInvoke = function(text, ...)
-                pcall(handleAnnouncement, "ADMIN", text, ...)
-                return nil
-            end
-        end)
-        print(okSet and "[Phi] Announce hooked via OnClientInvoke" or "[Phi] Could not hook Announce")
+-- ══ REMOTE DISCOVERY ════════════════════════════════════════════
+-- Names are hashed and rotate, so identify the announcement remote by
+-- the SHAPE of its payload instead of its name. Real signature seen
+-- via RemoteSpy:  (text, duration, "Sounds.Sfx.Blop", "Top", soundId)
+local POSITIONS = { Top=true, Bottom=true, Center=true, Centre=true, Middle=true,
+                    Left=true, Right=true, TopRight=true, TopLeft=true, BottomRight=true }
+
+local function looksLikeAnnouncement(...)
+    local a = table.pack(...)
+    if a.n == 0 or typeof(a[1]) ~= "string" or #a[1] < 3 then return false end
+    for i = 2, a.n do
+        local v = a[i]
+        if typeof(v) == "string" then
+            if v:find("Sounds%.") or v:find("rbxassetid") then return true end -- sound path/id
+            if POSITIONS[v] then return true end                               -- screen position
+        end
     end
+    -- fallback: the (string, number, string, string, number) shape
+    return typeof(a[2]) == "number" and typeof(a[3]) == "string"
+       and typeof(a[4]) == "string" and typeof(a[5]) == "number"
 end
 
-print("[Phi] v10 ready.")
+local function gather(root)
+    local res, rfs = {}, {}
+    for _, d in ipairs(root:GetDescendants()) do
+        if d:IsA("RemoteEvent") then table.insert(res, d)
+        elseif d:IsA("RemoteFunction") then table.insert(rfs, d) end
+    end
+    return res, rfs
+end
+local remoteEvents, remoteFns = gather(Net)
+
+local hooked = 0
+local function hookEvent(re)
+    re.OnClientEvent:Connect(function(...)
+        if looksLikeAnnouncement(...) then
+            if NotifyRemote ~= re then
+                NotifyRemote = re
+                print("[Phi] Notify locked ->", re.Name)
+            end
+            pcall(handleAnnouncement, "NOTIFY", (...))
+        end
+    end)
+    hooked += 1
+end
+for _, re in ipairs(remoteEvents) do hookEvent(re) end
+Net.DescendantAdded:Connect(function(d) if d:IsA("RemoteEvent") then hookEvent(d) end end)
+
+-- Redeem RemoteFunction: try by name, otherwise learn it the first time
+-- a code is redeemed through the game's own UI (passive namecall hook).
+for _, rf in ipairs(remoteFns) do
+    local n = rf.Name:lower()
+    if n:find("redeem") or n:find("redemption") then RedeemRemote = rf; break end
+end
+if not RedeemRemote and hookmetamethod and getnamecallmethod then
+    pcall(function()
+        local old
+        old = hookmetamethod(game, "__namecall", function(self, ...)
+            if not RedeemRemote and getnamecallmethod() == "InvokeServer"
+               and typeof(self) == "Instance" and self:IsA("RemoteFunction") then
+                local first = (...)
+                if typeof(first) == "string" and #first >= 3 and #first <= 40 then
+                    RedeemRemote = self
+                    print("[Phi] Redeem learned ->", self.Name)
+                end
+            end
+            return old(self, ...)
+        end)
+    end)
+end
+
+setCStatus(("listening on %d remotes…"):format(hooked), "idle")
+print(("[Phi] v11 ready — watching %d RemoteEvents, redeem=%s")
+    :format(hooked, RedeemRemote and RedeemRemote.Name or "learn-on-use"))
