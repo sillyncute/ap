@@ -166,7 +166,26 @@ task.spawn(function()
 end)
 
 local title = label("PHI AUTOTYPER", 13, F.black, K.txt, nil, Head)
-title.Size = UDim2.new(1, -104, 1, 0); title.Position = UDim2.new(0, 32, 0, 0); title.ZIndex = 12
+title.Size = UDim2.new(1, -132, 1, 0); title.Position = UDim2.new(0, 32, 0, 0); title.ZIndex = 12
+
+-- feed button (drawn as a list icon: dot + line rows)
+local feedBtn = mk("TextButton", Head)
+feedBtn.Size = UDim2.new(0, 22, 0, 22); feedBtn.AnchorPoint = Vector2.new(1, 0.5)
+feedBtn.Position = UDim2.new(1, -66, 0.5, 0); feedBtn.BackgroundColor3 = K.bg3
+feedBtn.Text = ""; feedBtn.BorderSizePixel = 0; feedBtn.AutoButtonColor = false; feedBtn.ZIndex = 13
+corner(7, feedBtn); local feedBtnStroke = stroke(feedBtn, K.bdr, 1, 0)
+for i = 0, 2 do
+    local dot = mk("Frame", feedBtn)
+    dot.Size = UDim2.new(0, 2.5, 0, 2.5); dot.AnchorPoint = Vector2.new(0, 0.5)
+    dot.Position = UDim2.new(0, 5, 0.5, (i-1)*4); dot.BackgroundColor3 = K.txt2
+    dot.BorderSizePixel = 0; dot.ZIndex = 14; corner(2, dot)
+    local ln = mk("Frame", feedBtn)
+    ln.Size = UDim2.new(0, 8, 0, 1.6); ln.AnchorPoint = Vector2.new(0, 0.5)
+    ln.Position = UDim2.new(0, 9, 0.5, (i-1)*4); ln.BackgroundColor3 = K.txt2
+    ln.BorderSizePixel = 0; ln.ZIndex = 14; corner(1, ln)
+end
+feedBtn.MouseEnter:Connect(function() tw(feedBtn, 0.1, {BackgroundColor3 = K.bg4}); tw(feedBtnStroke, 0.1, {Color = K.acc}) end)
+feedBtn.MouseLeave:Connect(function() tw(feedBtn, 0.1, {BackgroundColor3 = K.bg3}); tw(feedBtnStroke, 0.1, {Color = K.bdr}) end)
 
 -- gear / settings button (drawn as a clean 3-line menu icon)
 local gear = mk("TextButton", Head)
@@ -517,6 +536,143 @@ gear.MouseButton1Click:Connect(function()
     Settings.Visible = true
 end)
 
+-- ══ LIVE FEED ════════════════════════════════════════════════════
+-- Logs every announcement caught off the notify remote, newest on top.
+local FW, FH = 306, 300
+local FeedWin = mk("Frame", SG); FeedWin.Name = "Feed"
+FeedWin.Size = UDim2.new(0, FW, 0, FH)
+FeedWin.Position = UDim2.new(1, -PW - 24 - FW - 12, 0.5, -FH/2)
+FeedWin.BackgroundColor3 = K.bg; FeedWin.BackgroundTransparency = 0.12
+FeedWin.BorderSizePixel = 0; FeedWin.ClipsDescendants = true; FeedWin.ZIndex = 20
+FeedWin.Visible = false; corner(14, FeedWin)
+stroke(FeedWin, K.bdr, 1.4, 0.25)
+
+local fHead = mk("Frame", FeedWin)
+fHead.Size = UDim2.new(1, 0, 0, 32); fHead.BackgroundColor3 = K.bg1
+fHead.BackgroundTransparency = 0.08; fHead.BorderSizePixel = 0; fHead.ZIndex = 21
+corner(14, fHead)
+local fHeadMask = mk("Frame", fHead); fHeadMask.Size = UDim2.new(1,0,0,10)
+fHeadMask.Position = UDim2.new(0,0,1,-10); fHeadMask.BackgroundColor3 = K.bg1
+fHeadMask.BackgroundTransparency = 0.08; fHeadMask.BorderSizePixel = 0; fHeadMask.ZIndex = 21
+local fLiveDot = mk("Frame", fHead)
+fLiveDot.Size = UDim2.new(0, 7, 0, 7); fLiveDot.AnchorPoint = Vector2.new(0, 0.5)
+fLiveDot.Position = UDim2.new(0, 12, 0.5, 0); fLiveDot.BackgroundColor3 = K.err
+fLiveDot.BorderSizePixel = 0; fLiveDot.ZIndex = 22; corner(50, fLiveDot)
+task.spawn(function()
+    while fLiveDot and fLiveDot.Parent do
+        tw(fLiveDot, 0.7, {BackgroundTransparency = 0.6}); task.wait(0.8)
+        if not (fLiveDot and fLiveDot.Parent) then break end
+        tw(fLiveDot, 0.7, {BackgroundTransparency = 0}); task.wait(0.8)
+    end
+end)
+local fTitle = label("LIVE FEED", 11, F.black, K.txt, nil, fHead)
+fTitle.Size = UDim2.new(1, -110, 1, 0); fTitle.Position = UDim2.new(0, 26, 0, 0); fTitle.ZIndex = 22
+local fCountLbl = label("0", 9, F.bold, K.txt3, Enum.TextXAlignment.Right, fHead)
+fCountLbl.Size = UDim2.new(0, 50, 1, 0); fCountLbl.Position = UDim2.new(1, -64, 0, 0); fCountLbl.ZIndex = 22
+local fClose = mk("TextButton", fHead)
+fClose.Size = UDim2.new(0, 20, 0, 20); fClose.AnchorPoint = Vector2.new(1, 0.5)
+fClose.Position = UDim2.new(1, -8, 0.5, 0); fClose.BackgroundColor3 = K.bg3
+fClose.TextColor3 = K.txt2; fClose.Font = F.bold; fClose.TextSize = 10
+fClose.Text = "X"; fClose.BorderSizePixel = 0; fClose.AutoButtonColor = false; fClose.ZIndex = 23
+corner(10, fClose); stroke(fClose, K.bdr, 1, 0)
+fClose.MouseEnter:Connect(function() tw(fClose, 0.1, {BackgroundColor3 = K.err, TextColor3 = K.txt}) end)
+fClose.MouseLeave:Connect(function() tw(fClose, 0.1, {BackgroundColor3 = K.bg3, TextColor3 = K.txt2}) end)
+fClose.MouseButton1Click:Connect(function() FeedWin.Visible = false end)
+attachDrag(fHead, FeedWin)
+
+local feedScroll = mk("ScrollingFrame", FeedWin)
+feedScroll.Size = UDim2.new(1, -16, 1, -40); feedScroll.Position = UDim2.new(0, 8, 0, 36)
+feedScroll.BackgroundTransparency = 1; feedScroll.BorderSizePixel = 0
+feedScroll.ScrollBarThickness = 3; feedScroll.ScrollBarImageColor3 = K.accDim
+feedScroll.ScrollBarImageTransparency = 0.3; feedScroll.ZIndex = 21
+feedScroll.CanvasSize = UDim2.new(0,0,0,0); feedScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+feedScroll.ScrollingDirection = Enum.ScrollingDirection.Y
+local feedLay = mk("UIListLayout", feedScroll)
+feedLay.SortOrder = Enum.SortOrder.LayoutOrder; feedLay.Padding = UDim.new(0, 6)
+
+local fEmpty = label("waiting for announcements…", 10, F.med, K.txt3, Enum.TextXAlignment.Center, feedScroll)
+fEmpty.Size = UDim2.new(1, 0, 0, 40); fEmpty.LayoutOrder = 999; fEmpty.ZIndex = 22
+
+local feedCards, feedOrder, MAX_FEED = {}, 0, 40
+
+local function addFeedEntry(text, code)
+    if fEmpty then fEmpty:Destroy(); fEmpty = nil end
+    feedOrder += 1
+    fCountLbl.Text = tostring(feedOrder)
+
+    local card = mk("Frame", feedScroll)
+    card.Size = UDim2.new(1, 0, 0, 0); card.AutomaticSize = Enum.AutomaticSize.Y
+    card.BackgroundColor3 = K.bg3; card.BackgroundTransparency = 0.05
+    card.BorderSizePixel = 0; card.LayoutOrder = -feedOrder; card.ZIndex = 22
+    corner(8, card); stroke(card, K.line, 1, 0.3)
+    local cpad = mk("UIPadding", card)
+    cpad.PaddingTop = UDim.new(0,8); cpad.PaddingBottom = UDim.new(0,8)
+    cpad.PaddingLeft = UDim.new(0,9); cpad.PaddingRight = UDim.new(0,9)
+    local clay = mk("UIListLayout", card)
+    clay.SortOrder = Enum.SortOrder.LayoutOrder; clay.Padding = UDim.new(0, 5)
+
+    -- header line: source dot + NOTIFY + time
+    local hrow = mk("Frame", card)
+    hrow.Size = UDim2.new(1, 0, 0, 12); hrow.BackgroundTransparency = 1; hrow.LayoutOrder = 1; hrow.ZIndex = 23
+    local sdot = mk("Frame", hrow)
+    sdot.Size = UDim2.new(0, 6, 0, 6); sdot.AnchorPoint = Vector2.new(0, 0.5)
+    sdot.Position = UDim2.new(0, 0, 0.5, 0); sdot.BackgroundColor3 = code and K.acc or K.txt3
+    sdot.BorderSizePixel = 0; sdot.ZIndex = 24; corner(50, sdot)
+    local src = label("NOTIFY", 8, F.black, K.accDim, nil, hrow)
+    src.Size = UDim2.new(0, 60, 1, 0); src.Position = UDim2.new(0, 12, 0, 0); src.ZIndex = 24
+    local tm = label(os.date("%H:%M:%S"), 8, F.med, K.txt3, Enum.TextXAlignment.Right, hrow)
+    tm.Size = UDim2.new(0, 70, 1, 0); tm.Position = UDim2.new(1, -70, 0, 0); tm.ZIndex = 24
+
+    -- message text
+    local msg = label(text, 10, F.med, K.txt, nil, card)
+    msg.Size = UDim2.new(1, 0, 0, 0); msg.AutomaticSize = Enum.AutomaticSize.Y
+    msg.TextWrapped = true; msg.LayoutOrder = 2; msg.ZIndex = 23
+
+    -- code chip + actions
+    if code then
+        local crow = mk("Frame", card)
+        crow.Size = UDim2.new(1, 0, 0, 26); crow.BackgroundTransparency = 1; crow.LayoutOrder = 3; crow.ZIndex = 23
+        local chip = mk("Frame", crow)
+        chip.Size = UDim2.new(0.46, -4, 1, 0); chip.BackgroundColor3 = K.input
+        chip.BorderSizePixel = 0; chip.ZIndex = 24; corner(5, chip); stroke(chip, K.bdr, 1, 0.2)
+        local chl = label(code, 11, F.black, K.accHov, Enum.TextXAlignment.Center, chip)
+        chl.Size = UDim2.new(1, -8, 1, 0); chl.Position = UDim2.new(0, 4, 0, 0); chl.ZIndex = 25
+
+        local cp = mk("TextButton", crow)
+        cp.Size = UDim2.new(0.24, -4, 1, 0); cp.Position = UDim2.new(0.52, 0, 0, 0)
+        cp.BackgroundColor3 = K.bg2; cp.BorderSizePixel = 0; cp.Text = "COPY"
+        cp.TextColor3 = K.txt2; cp.Font = F.bold; cp.TextSize = 9; cp.AutoButtonColor = false; cp.ZIndex = 24
+        corner(5, cp); stroke(cp, K.bdr, 1, 0.2)
+        cp.MouseButton1Click:Connect(function()
+            local ok = copyText(code); cp.Text = ok and "OK" or "ERR"
+            task.delay(0.7, function() if cp.Parent then cp.Text = "COPY" end end)
+        end)
+
+        local rd = mk("TextButton", crow)
+        rd.Size = UDim2.new(0.24, -4, 1, 0); rd.Position = UDim2.new(0.76, 0, 0, 0)
+        rd.BackgroundColor3 = K.acc; rd.BorderSizePixel = 0; rd.Text = "REDEEM"
+        rd.TextColor3 = Color3.fromRGB(18,18,22); rd.Font = F.black; rd.TextSize = 9
+        rd.AutoButtonColor = false; rd.ZIndex = 24; corner(5, rd)
+        rd.MouseButton1Click:Connect(function()
+            rd.Text = "…"; task.spawn(function() runRedeem(code, true); rd.Text = "REDEEM" end)
+        end)
+    end
+
+    table.insert(feedCards, card)
+    if #feedCards > MAX_FEED then
+        local oldc = table.remove(feedCards, 1)
+        if oldc then oldc:Destroy() end
+    end
+end
+
+-- feed button opens the feed beside Main
+feedBtn.MouseButton1Click:Connect(function()
+    if FeedWin.Visible then FeedWin.Visible = false; return end
+    local mp = Main.Position
+    FeedWin.Position = UDim2.new(mp.X.Scale, mp.X.Offset - FW - 12, mp.Y.Scale, mp.Y.Offset + (PH - FH)/2)
+    FeedWin.Visible = true
+end)
+
 -- ── Keybind input (toggle monitor + rebind capture) ──────────────
 UserInputService.InputBegan:Connect(function(input, gpe)
     if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
@@ -550,6 +706,7 @@ local function handleAnnouncement(source, text, ...)
     for _, tok in ipairs(tokenize(stripped)) do
         if isCandidate(tok) then found = tok; break end
     end
+    addFeedEntry(stripped, found)            -- live feed: log every announcement
     if not found then return end
     lastCapturedCode = found
     flashCatch()
