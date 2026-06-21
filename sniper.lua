@@ -583,6 +583,15 @@ end
 local remoteEvents, remoteFns = gather(Net)
 
 local hooked = 0
+local function dumpArgs(...)
+    local parts = {}
+    for i = 1, select("#", ...) do
+        local v = select(i, ...)
+        parts[i] = (typeof(v) == "string") and ('"' .. v .. '"') or tostring(v)
+    end
+    return table.concat(parts, ", ")
+end
+
 local function hookEvent(re)
     re.OnClientEvent:Connect(function(...)
         if NotifyRemote and NotifyRemote ~= re then return end  -- stick to the locked remote
@@ -590,6 +599,7 @@ local function hookEvent(re)
             if not NotifyRemote then
                 NotifyRemote = re
                 print("[Phi] Notify locked ->", re.Name)
+                print("[Phi] PROOF payload:", dumpArgs(...))  -- eyeball: is this a real announcement?
             end
             pcall(handleAnnouncement, "NOTIFY", (...))
         end
