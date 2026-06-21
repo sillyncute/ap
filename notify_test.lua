@@ -1,10 +1,12 @@
 -- ============================================================
--- PHI NOTIFY TEST
--- Fires a FAKE announcement locally through the suspected notify
--- remote and lets you confirm its identity two ways:
---   1) does the game draw a notification popup on screen?  -> it IS the notify remote
---   2) does Phi catch the embedded code?                   -> Phi is listening correctly
--- Nothing is sent to the server; this only triggers client-side handlers.
+-- PHI NOTIFY TEST  (word-by-word)
+-- Fires FAKE announcements locally through the notify remote so
+-- you can test the LISTEN flow:
+--   1) load Phi, open the LIVE FEED
+--   2) press F (LISTEN turns on), set WORDS to match (e.g. 2 or 3)
+--   3) run this script -> it posts the code one word at a time
+--   4) watch the status count up (1/N, 2/N...) then insta-redeem
+-- Nothing is sent to the server; this only triggers client handlers.
 -- NOTE: the hashed name rotates — paste the CURRENT locked name below.
 -- ============================================================
 
@@ -13,6 +15,10 @@ local Net = RS:WaitForChild("Packages"):WaitForChild("Net")
 
 -- <<< current locked notify remote name (from "[Phi] Notify locked ->") >>>
 local NAME = "RE/7a01d0e095cd7447090a56f564aa2b6555f95cafba62aa048e1542b4d52d4272"
+
+-- the words the "owner" will post, one announcement each (joined = the code)
+local WORDS = { "octo", "1234" }       -- e.g. WORDS=2 -> octo1234
+local GAP   = 0.8                      -- seconds between each word
 
 local remote = Net:FindFirstChild(NAME)
 if not remote then
@@ -25,25 +31,14 @@ if typeof(firesignal) ~= "function" then
     return
 end
 
-local code = "TESTCODE" .. tostring(math.random(1000, 9999))
-local msg  = "TEST ANNOUNCEMENT — redeem " .. code .. " right now lol"
+print("[Test] Posting code word-by-word:", table.concat(WORDS, " + "), "=", table.concat(WORDS))
+print("[Test] Make sure LISTEN (F) is ON and WORDS = " .. #WORDS)
 
-print("=========================================")
-print("[Test] Firing fake announcement through:")
-print("[Test]   " .. remote.Name)
-print("[Test] embedded code = " .. code)
-print("[Test] WATCH FOR:")
-print("[Test]   1) a notification popup on screen with the message above")
-print("[Test]   2) Phi status / console catching " .. code)
-print("=========================================")
-
--- same payload shape your RemoteSpy showed: (text, duration, sound, position, soundId)
-firesignal(remote.OnClientEvent,
-    msg,
-    5.5,
-    "Sounds.Sfx.Blop",
-    "Top",
-    2678001507
-)
-
-print("[Test] sent. If NO popup appeared, this remote is NOT the notification one.")
+task.spawn(function()
+    for i, w in ipairs(WORDS) do
+        firesignal(remote.OnClientEvent, w, 5.5, "Sounds.Sfx.Blop", "Top", 2678001507)
+        print("[Test] posted word " .. i .. "/" .. #WORDS .. ": " .. w)
+        task.wait(GAP)
+    end
+    print("[Test] done. Phi should have assembled '" .. table.concat(WORDS) .. "' and fired.")
+end)

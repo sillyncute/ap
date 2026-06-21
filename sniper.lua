@@ -1,8 +1,9 @@
 -- ============================================================
--- PHI AUTOTYPER  v12  (mini)
--- One compact panel. Custom-code entry + monitor sniper on a
--- rebindable key. Settings: keybind, auto-type, auto-redeem,
--- case (UPPER/lower/BOTH) and WORDS (stitch 1/2/3 announced words).
+-- PHI AUTOTYPER  v13  (mini)
+-- Press the key (F) to LISTEN: it collects the next N words the owner
+-- says (within one message or across several) then insta-redeems.
+-- Settings: keybind, auto-type, auto-redeem, RAW (exact single word),
+-- CASE (UPPER/lower/BOTH) and WORDS (how many words make one code).
 -- Remote names are hashed & rotate, so the announcement remote is
 -- found by payload SHAPE (not name); the redeem remote is found by
 -- name or learned on first manual use. See "REMOTE DISCOVERY".
@@ -271,7 +272,7 @@ monRow.BackgroundColor3 = K.bg2; monRow.BackgroundTransparency = 0.08
 monRow.BorderSizePixel = 0; monRow.ZIndex = 12
 corner(7, monRow); stroke(monRow, K.line, 1, 0.3)
 
-local monLbl = label("MONITOR", 10, F.bold, K.txt2, nil, monRow)
+local monLbl = label("LISTEN", 10, F.bold, K.txt2, nil, monRow)
 monLbl.Size = UDim2.new(1, -120, 1, 0); monLbl.Position = UDim2.new(0, 10, 0, 0); monLbl.ZIndex = 13
 
 local keyHint = mk("Frame", monRow)
@@ -305,7 +306,7 @@ cStatusDot.Size = UDim2.new(0, 7, 0, 7); cStatusDot.AnchorPoint = Vector2.new(0,
 cStatusDot.Position = UDim2.new(0, 10, 0, 30); cStatusDot.BackgroundColor3 = K.txt3
 cStatusDot.BorderSizePixel = 0; cStatusDot.ZIndex = 13; corner(50, cStatusDot)
 
-local cStatusLbl = label("type a code, or press the key to snipe.", 11, F.bold, K.txt, nil, cStatus)
+local cStatusLbl = label("type a code, or press the key to listen.", 11, F.bold, K.txt, nil, cStatus)
 cStatusLbl.Size = UDim2.new(1, -30, 0, 26); cStatusLbl.Position = UDim2.new(0, 22, 0, 17)
 cStatusLbl.TextWrapped = true; cStatusLbl.TextYAlignment = Enum.TextYAlignment.Center; cStatusLbl.ZIndex = 13
 
@@ -363,8 +364,9 @@ local seenAttempts    = {}
 local autoType        = true
 local autoRedeem      = true
 local caseMode        = "UPPER"   -- "UPPER" | "lower" | "BOTH"
-local wordCount       = 1         -- how many announced words form one code (1/2/3)
-local recentWords     = {}        -- rolling buffer of the last few announced words
+local wordCount       = 1         -- words to collect per code (1/2/3)
+local rawMode         = false     -- ignore WORDS+CASE; use the exact word(s) as typed
+local collectBuffer   = {}        -- words gathered since listening (F) started
 local bindKey         = Enum.KeyCode.F
 local rebinding       = false
 
@@ -374,39 +376,37 @@ local function caseVariants(code)
     else return { code:upper(), code:lower() } end
 end
 
+local function targetWords() return rawMode and 1 or wordCount end
+local function resetCollect() collectBuffer = {}; seenAttempts = {} end
+
 local function setMonitor(v)
     monitorOn = v
     tw(pill, 0.15, {BackgroundColor3 = v and K.acc or K.txt3})
     tw(pdot, 0.15, {Position = UDim2.new(0, v and 20 or 2, 0.5, -6)}, Enum.EasingStyle.Back)
     tw(monLbl, 0.15, {TextColor3 = v and K.accHov or K.txt2})
     tw(Main, 0.15, {BackgroundTransparency = v and 0.06 or 0.12})
-    if v then setCStatus("waiting for code...", "wait")
-    else setCStatus("monitor off.", "idle") end
+    if v then resetCollect(); setCStatus(("listening… 0/%d"):format(targetWords()), "wait")
+    else setCStatus("listen off.", "idle") end
 end
 monBtn.MouseButton1Click:Connect(function() setMonitor(not monitorOn) end)
 
-local function snipe(rawCode)
-    if not rawCode or rawCode == "" then return end
-    local todo = {}
-    for _, v in ipairs(caseVariants(rawCode)) do
-        if not seenAttempts[v] then seenAttempts[v] = true; table.insert(todo, v) end
-    end
-    if #todo == 0 then
-        if autoType then CodeBox.Text = caseVariants(rawCode)[1] end
-        return
-    end
-    if autoType then CodeBox.Text = todo[1] end
+-- redeem an assembled code (RAW = keep exact case; else apply the CASE setting)
+local function fireAssembled(code)
+    local variants = rawMode and { code } or caseVariants(code)
+    if autoType then CodeBox.Text = variants[1] end
     if autoRedeem then
         task.spawn(function()
-            for _, v in ipairs(todo) do runRedeem(v, autoType) end
+            for _, v in ipairs(variants) do
+                if not seenAttempts[v] then seenAttempts[v] = true; runRedeem(v, autoType) end
+            end
         end)
     else
-        setCStatus("typed: " .. todo[1] .. " — auto-redeem off", "ok")
+        setCStatus("collected: " .. variants[1] .. " — auto-redeem off", "ok")
     end
 end
 
 -- ══ SETTINGS PANEL ═══════════════════════════════════════════════
-local SW, SH = 220, 228
+local SW, SH = 220, 254
 local Settings = mk("Frame", SG); Settings.Name = "Settings"
 Settings.Size = UDim2.new(0, SW, 0, SH)
 Settings.Position = UDim2.new(1, -PW - 24 - SW - 12, 0.5, -SH/2)
@@ -488,6 +488,7 @@ local function makeToggleRow(y, text, default, onChange)
 end
 makeToggleRow(34, "AUTO TYPE",   autoType,   function(v) autoType = v end)
 makeToggleRow(68, "AUTO REDEEM", autoRedeem, function(v) autoRedeem = v end)
+makeToggleRow(102, "RAW WORD",   rawMode,    function(v) rawMode = v; resetCollect() end)
 
 -- segmented row helper (used for CASE and WORDS)
 local function makeSegRow(y, labelText, opts, default, onChange)
@@ -517,10 +518,10 @@ local function makeSegRow(y, labelText, opts, default, onChange)
     end
     sel(default)
 end
-makeSegRow(102, "CASE",  {"UPPER", "lower", "BOTH"}, caseMode, function(o) caseMode = o end)
-makeSegRow(136, "WORDS", {"1", "2", "3"}, tostring(wordCount), function(o)
+makeSegRow(136, "CASE",  {"UPPER", "lower", "BOTH"}, caseMode, function(o) caseMode = o end)
+makeSegRow(170, "WORDS", {"1", "2", "3"}, tostring(wordCount), function(o)
     wordCount = tonumber(o) or 1
-    recentWords = {}            -- reset the word buffer when the setting changes
+    resetCollect()              -- reset the word buffer when the setting changes
 end)
 
 -- gear opens settings beside Main
@@ -691,8 +692,7 @@ UserInputService.InputBegan:Connect(function(input, gpe)
     end
     if gpe then return end                       -- ignore while typing in the box
     if input.KeyCode == bindKey then
-        setMonitor(not monitorOn)
-        if monitorOn and lastCapturedCode then snipe(lastCapturedCode) end
+        setMonitor(not monitorOn)                -- F arms/disarms listening
     end
 end)
 
@@ -705,58 +705,32 @@ local function flashCatch()
     end)
 end
 
--- representative word of one announcement: a code-shaped token if present,
--- else the longest real word (so "John" / "Pork" get captured for stitching).
-local MIN_FRAG_LEN = 3
-local function extractWord(stripped)
-    local tokens = tokenize(stripped)
-    for _, t in ipairs(tokens) do
-        if isCandidate(t) then return t end
-    end
-    local best
-    for _, t in ipairs(tokens) do
-        if #t >= MIN_FRAG_LEN and not BORING[t:upper()] then
-            if not best or #t > #best then best = t end
-        end
-    end
-    return best
-end
-
+-- While listening (armed by F), collect words IN ORDER from each announcement
+-- until we reach the target count, then join + insta-redeem. Words may all come
+-- from one message ("the FIRST ..." -> theFIRST with WORDS=2) or across several
+-- ("octo" .. "1234" -> octo1234). RAW = the first single word, exact case.
 local function handleAnnouncement(source, text, ...)
     local stripped = stripRich(tostring(text or "")); if stripped == "" then return end
-
-    -- a single code-shaped token (used directly in 1-word mode)
-    local codeTok
-    for _, tok in ipairs(tokenize(stripped)) do
-        if isCandidate(tok) then codeTok = tok; break end
-    end
-    -- buffer one representative word per announcement (for stitching)
-    local word = extractWord(stripped)
-    if word then
-        table.insert(recentWords, word)
-        while #recentWords > 3 do table.remove(recentWords, 1) end
-    end
-
-    -- build the candidate from the WORDS setting
-    local candidate
-    if wordCount <= 1 then
-        candidate = codeTok                        -- only real codes in 1-word mode
-    elseif #recentWords >= wordCount then
-        local parts = {}                           -- stitch the last N announced words
-        for i = #recentWords - wordCount + 1, #recentWords do parts[#parts + 1] = recentWords[i] end
-        candidate = table.concat(parts)
-    end
-
-    addFeedEntry(stripped, candidate)              -- live feed: every announcement
-    if not candidate then return end
-    lastCapturedCode = candidate
-    flashCatch()
+    local firedCode
     if monitorOn then
-        snipe(candidate)
-    else
-        if getCustomCode() == "" then CodeBox.Text = candidate end
-        setCStatus("caught " .. candidate .. " — press " .. bindKey.Name, "wait")
+        for _, w in ipairs(tokenize(stripped)) do
+            collectBuffer[#collectBuffer + 1] = w
+        end
+        local target = targetWords()
+        if #collectBuffer >= target then
+            local picked = {}
+            for i = 1, target do picked[i] = collectBuffer[i] end
+            firedCode = table.concat(picked)
+            resetCollect()
+            setMonitor(false)            -- one-shot: stop listening after a code
+            lastCapturedCode = firedCode
+            flashCatch()
+            fireAssembled(firedCode)
+        else
+            setCStatus(("listening… %d/%d  (+%s)"):format(#collectBuffer, target, collectBuffer[#collectBuffer]), "wait")
+        end
     end
+    addFeedEntry(stripped, firedCode)              -- live feed: every announcement
 end
 
 -- ══ REMOTE DISCOVERY ════════════════════════════════════════════
@@ -842,6 +816,6 @@ if not RedeemRemote and hookmetamethod and getnamecallmethod then
     end)
 end
 
-setCStatus("waiting for an announcement…", "idle")
-print(("[Phi] v12 ready — redeem=%s. Searching for the announcement remote.")
+setCStatus("press " .. bindKey.Name .. " to listen, or type a code.", "idle")
+print(("[Phi] v13 ready — redeem=%s. Searching for the announcement remote.")
     :format(RedeemRemote and RedeemRemote.Name or "learn-on-use"))
