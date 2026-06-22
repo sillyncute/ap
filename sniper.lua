@@ -942,26 +942,13 @@ else
     Net.DescendantAdded:Connect(function(d) if d:IsA("RemoteEvent") then hookEvent(d) end end)
 end
 
--- Redeem RemoteFunction: by name, else learn it on the first manual redeem
+-- Redeem RemoteFunction — found by its readable name (no hooks, no spam)
 for _, rf in ipairs(gatherRFs(Net)) do
     local n = rf.Name:lower()
     if n:find("redeem") or n:find("redemption") then RedeemRemote = rf; break end
 end
-if not RedeemRemote and hookmetamethod and getnamecallmethod then
-    pcall(function()
-        local old
-        old = hookmetamethod(game, "__namecall", function(self, ...)
-            if not RedeemRemote and getnamecallmethod() == "InvokeServer"
-               and typeof(self) == "Instance" and self:IsA("RemoteFunction") then
-                local first = (...)
-                if typeof(first) == "string" and #first >= 3 and #first <= 40 then
-                    RedeemRemote = self
-                    print("[Phi] Redeem learned ->", self.Name)
-                end
-            end
-            return old(self, ...)
-        end)
-    end)
+if not RedeemRemote then
+    warn("[Phi] Redeem remote not found by name — manual/auto redeem will be disabled.")
 end
 
 setCStatus("press " .. bindKey.Name .. " to listen, or type a code.", "idle")
