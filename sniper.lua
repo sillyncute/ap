@@ -1,10 +1,10 @@
 -- ============================================================
--- PHI AUTOTYPER  v14  (mini)
--- Press the key (F) to LISTEN: it collects the next N words the owner
--- says (within one message or across several), live-previews them in
--- the CODE box, and redeems instantly (0 delay). INSTA REDEEM toggle
--- on the panel lets you do it manually. The + button opens a TEST
--- SENDER to inject fake announcements for testing.
+-- PHI AUTOTYPER  v15  (mini)
+-- Listens to ONLY the NotificationController 'Notify' remote (found via
+-- its script, so the rotating hash never matters). Press the key (F) to
+-- LISTEN: it collects the next N words the owner says, live-previews them
+-- in the CODE box, and redeems instantly (0 delay). INSTA REDEEM toggle
+-- lets you do it manually. The + button opens a TEST SENDER.
 -- Remote names are hashed & rotate, so the announcement remote is
 -- found by payload SHAPE (not name); the redeem remote is found by
 -- name or learned on first manual use. See "REMOTE DISCOVERY".
@@ -853,70 +853,91 @@ function handleAnnouncement(source, text, ...)
     addFeedEntry(stripped, feedChip)              -- live feed: every announcement
 end
 
--- ══ REMOTE DISCOVERY ════════════════════════════════════════════
--- Names are hashed and rotate, so identify the announcement remote by
--- the SHAPE of its payload instead of its name. Real signature seen
--- via RemoteSpy:  (text, duration, "Sounds.Sfx.Blop", "Top", soundId)
-local POSITIONS = { Top=true, Bottom=true, Center=true, Centre=true, Middle=true,
-                    Left=true, Right=true, TopRight=true, TopLeft=true, BottomRight=true }
-
-local function looksLikeAnnouncement(...)
-    local a = table.pack(...)
-    if a.n == 0 or typeof(a[1]) ~= "string" or #a[1] < 3 then return false end
-    local hasSound, hasPos = false, false
-    for i = 2, a.n do
-        local v = a[i]
-        if typeof(v) == "string" then
-            if v:find("Sounds%.") or v:find("rbxassetid") then hasSound = true end -- sound path/id
-            if POSITIONS[v] then hasPos = true end                                 -- screen position
-        end
-    end
-    return hasSound or hasPos
-end
-
-local function gather(root)
-    local res, rfs = {}, {}
+-- ══ NOTIFY REMOTE (via NotificationController) ═══════════════════
+-- The notify remote is the 'Notify' event owned by NotificationController.
+-- The hash rotates but the controller's script name doesn't — so we pull
+-- the live RemoteEvent straight out of its code and listen to ONLY it.
+local function gatherRFs(root)
+    local rfs = {}
     for _, d in ipairs(root:GetDescendants()) do
-        if d:IsA("RemoteEvent") then table.insert(res, d)
-        elseif d:IsA("RemoteFunction") then table.insert(rfs, d) end
+        if d:IsA("RemoteFunction") then table.insert(rfs, d) end
     end
-    return res, rfs
-end
-local remoteEvents, remoteFns = gather(Net)
-
-local hooked = 0
-local function dumpArgs(...)
-    local parts = {}
-    for i = 1, select("#", ...) do
-        local v = select(i, ...)
-        parts[i] = (typeof(v) == "string") and ('"' .. v .. '"') or tostring(v)
-    end
-    return table.concat(parts, ", ")
+    return rfs
 end
 
-local function hookEvent(re)
-    re.OnClientEvent:Connect(function(...)
-        if NotifyRemote and NotifyRemote ~= re then return end  -- stick to the locked remote
-        if looksLikeAnnouncement(...) then
-            if not NotifyRemote then
-                NotifyRemote = re
-                _G.PhiNotifyRemote = re                 -- publish for notify_test.lua
-                mark.BackgroundColor3 = K.ok            -- header dot: green = locked
-                fLiveDot.BackgroundColor3 = K.ok        -- feed dot: green = live
-                print("[Phi] Notify locked ->", re.Name)
-                print("[Phi] PROOF payload:", dumpArgs(...))  -- eyeball: is this a real announcement?
-            end
-            pcall(handleAnnouncement, "NOTIFY", (...))
+local function findNotifyRemote()
+    local getinfo   = debug and (debug.getinfo or debug.info)
+    local getups    = (debug and debug.getupvalues) or getupvalues
+    local getconsts = (debug and debug.getconstants) or getconstants
+    if not (getgc and getinfo) then return nil end
+    local function pick(list)
+        for _, v in pairs(list) do
+            if typeof(v) == "Instance" and v:IsA("RemoteEvent") and v.Name:match("^RE/%x+$") then return v end
         end
-    end)
-    hooked += 1
+    end
+    for _, fn in ipairs(getgc(true)) do
+        if type(fn) == "function" then
+            local ok, info = pcall(getinfo, fn)
+            if ok and type(info) == "table" then
+                local src = tostring(info.short_src or info.source or "")
+                if src:find("NotificationController", 1, true) then
+                    if getups then local k, ups = pcall(getups, fn); if k then local r = pick(ups); if r then return r end end end
+                    if getconsts then local k, cs = pcall(getconsts, fn); if k then local r = pick(cs); if r then return r end end end
+                end
+            end
+        end
+    end
+    return nil
 end
-for _, re in ipairs(remoteEvents) do hookEvent(re) end
-Net.DescendantAdded:Connect(function(d) if d:IsA("RemoteEvent") then hookEvent(d) end end)
 
--- Redeem RemoteFunction: try by name, otherwise learn it the first time
--- a code is redeemed through the game's own UI (passive namecall hook).
-for _, rf in ipairs(remoteFns) do
+local function markLocked(re, how)
+    NotifyRemote = re
+    _G.PhiNotifyRemote = re
+    mark.BackgroundColor3 = K.ok            -- header dot: green = locked
+    fLiveDot.BackgroundColor3 = K.ok        -- feed dot: green = live
+    print("[Phi] Notify locked (" .. how .. ") ->", re.Name)
+end
+
+-- primary: find & listen to ONLY the NotificationController remote
+local nr = findNotifyRemote()
+if nr then
+    markLocked(nr, "NotificationController")
+    nr.OnClientEvent:Connect(function(...) pcall(handleAnnouncement, "NOTIFY", (...)) end)
+else
+    -- fallback (only if debug tools are unavailable): identify by payload shape
+    warn("[Phi] NotificationController scan unavailable — falling back to shape detection.")
+    local POSITIONS = { Top=true, Bottom=true, Center=true, Centre=true, Middle=true,
+                        Left=true, Right=true, TopRight=true, TopLeft=true, BottomRight=true }
+    local function looksLikeAnnouncement(...)
+        local a = table.pack(...)
+        if a.n == 0 or typeof(a[1]) ~= "string" or #a[1] < 3 then return false end
+        local hasSound, hasPos = false, false
+        for i = 2, a.n do
+            local v = a[i]
+            if typeof(v) == "string" then
+                if v:find("Sounds%.") or v:find("rbxassetid") then hasSound = true end
+                if POSITIONS[v] then hasPos = true end
+            end
+        end
+        return hasSound or hasPos
+    end
+    local function hookEvent(re)
+        re.OnClientEvent:Connect(function(...)
+            if NotifyRemote and NotifyRemote ~= re then return end
+            if looksLikeAnnouncement(...) then
+                if not NotifyRemote then markLocked(re, "shape") end
+                pcall(handleAnnouncement, "NOTIFY", (...))
+            end
+        end)
+    end
+    for _, d in ipairs(Net:GetDescendants()) do
+        if d:IsA("RemoteEvent") then hookEvent(d) end
+    end
+    Net.DescendantAdded:Connect(function(d) if d:IsA("RemoteEvent") then hookEvent(d) end end)
+end
+
+-- Redeem RemoteFunction: by name, else learn it on the first manual redeem
+for _, rf in ipairs(gatherRFs(Net)) do
     local n = rf.Name:lower()
     if n:find("redeem") or n:find("redemption") then RedeemRemote = rf; break end
 end
@@ -938,5 +959,6 @@ if not RedeemRemote and hookmetamethod and getnamecallmethod then
 end
 
 setCStatus("press " .. bindKey.Name .. " to listen, or type a code.", "idle")
-print(("[Phi] v14 ready — redeem=%s. Searching for the announcement remote.")
-    :format(RedeemRemote and RedeemRemote.Name or "learn-on-use"))
+print(("[Phi] v15 ready — notify=%s, redeem=%s")
+    :format(NotifyRemote and NotifyRemote.Name or "NOT FOUND",
+            RedeemRemote and RedeemRemote.Name or "learn-on-use"))
