@@ -131,6 +131,7 @@ local caseMode         = "EXACT"  -- "UPPER" | "lower" | "EXACT" (as said)
 local wordCount        = 1        -- words to collect per code (1/2/3)
 local manualMode       = false    -- ignore 1/2/3: press key to start, press again to fire
 local collectBuffer    = {}       -- words gathered since listening started
+local lastPreview      = nil      -- last text WE wrote to the box (to detect user edits)
 local bindKey          = Enum.KeyCode.F
 local rebinding        = false
 local handleAnnouncement          -- forward declaration (assigned later)
@@ -421,6 +422,13 @@ end
 
 local function targetWords() return wordCount end
 local function resetCollect() collectBuffer = {}; seenAttempts = {} end
+
+-- write the live preview into the box, remembering what we wrote
+local function setPreview(t) lastPreview = t; CodeBox.Text = t end
+-- if YOU edit/clear the box while listening, restart the collection
+CodeBox:GetPropertyChangedSignal("Text"):Connect(function()
+    if monitorOn and CodeBox.Text ~= lastPreview then collectBuffer = {} end
+end)
 
 local function setMonitor(v)
     monitorOn = v
@@ -874,14 +882,14 @@ function handleAnnouncement(source, text, ...)
         if manualMode then
             -- collect everything; live-preview the whole buffer, fire on stop (key)
             local joined = table.concat(collectBuffer)
-            CodeBox.Text = caseVariants(joined)[1]
+            setPreview(caseVariants(joined)[1])
             setCStatus(("listening… %d words — press %s to fire"):format(#collectBuffer, bindKey.Name), "wait")
         else
             local target = targetWords()
             local upto, parts = math.min(#collectBuffer, target), {}
             for i = 1, upto do parts[i] = collectBuffer[i] end
             local joined  = table.concat(parts)
-            CodeBox.Text = caseVariants(joined)[1]          -- live preview
+            setPreview(caseVariants(joined)[1])             -- live preview
             if #collectBuffer >= target then
                 feedChip = caseVariants(joined)[1]
                 resetCollect()
