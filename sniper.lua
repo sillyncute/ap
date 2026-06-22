@@ -1,5 +1,5 @@
 -- ============================================================
--- PHI AUTOTYPER  v17  (mini)
+-- PHI AUTOTYPER  v18  (mini)
 -- Listens to ONLY the notify remote + uses ONLY the redeem remote — no
 -- other remotes are touched (anti-kick). Found via NotificationController,
 -- so the rotating hash never matters. Press the key (F) to LISTEN; it
@@ -23,31 +23,8 @@ local Net = ReplicatedStorage:WaitForChild("Packages"):WaitForChild("Net")
 -- the "REMOTE DISCOVERY" section near the bottom of this script.
 local NotifyRemote, RedeemRemote = nil, nil
 
--- ── Config ───────────────────────────────────────────────────────
-local MIN_WORD_LEN, MAX_WORD_LEN = 4, 30
-
-local BORING = {}
-for _, w in ipairs({
-    "HEY","HI","HELLO","YO","GUYS","MAKE","SURE","HAVE","FAST","FINGERS",
-    "CODE","CODES","READY","OK","OKAY","YES","NO","WAIT","NOW","GO","START",
-    "EVENT","EVENTS","THIS","THAT","THE","ARE","YOU","WE","US","ME","IT",
-    "IS","ISNT","WAS","WILL","SHALL","CAN","CANT","DO","DONT","DID",
-    "AND","OR","BUT","FOR","TO","FROM","IN","ON","AT","BY","OF","WITH",
-    "EVERYONE","EVERY","SOON","JUST","FREE","BRAINROT","REDEEM","REDEEMED",
-    "ERROR","SUCCESS","FAIL","FAILED","INVALID","EXPIRED","ALREADY",
-    "TRUE","FALSE","NULL","NONE","SERVER","CLIENT","PLAYER","GAME","ADMIN",
-    "HTTP","HTTPS","WWW","COM","NET","ORG","DISCORD","ANNOUNCE","ANNOUNCEMENT",
-}) do BORING[w] = true end
-
 -- ── Helpers ──────────────────────────────────────────────────────
 local function stripRich(s) if type(s) ~= "string" then return tostring(s) end; return (s:gsub("<[^>]+>", "")) end
-local function isCandidate(token)
-    if #token < MIN_WORD_LEN or #token > MAX_WORD_LEN then return false end
-    if BORING[token:upper()] then return false end
-    local hasDigit = token:match("%d") ~= nil
-    local allUp = token:upper() == token and token:match("%a") ~= nil
-    return allUp or hasDigit
-end
 local function tokenize(text) local t = {}; for raw in text:gmatch("[%w_]+") do table.insert(t, raw) end; return t end
 local function copyText(s)
     for _, fn in ipairs({setclipboard, toclipboard, (syn and syn.write_clipboard)}) do
@@ -369,7 +346,7 @@ local function runRedeem(code, doType)
     if not ok then setCStatus("invalid / cooldown", "err"); return end
     local s = (type(result) == "table") and (result.success or result.Success)
     if s == true or type(result) ~= "table" then
-        setCStatus("Redeemed", "ok"); CodeBox.Text = "Redeemed"
+        setCStatus("Redeemed", "ok")          -- status only; never touch the code box
     else
         setCStatus("invalid / cooldown", "err")
     end
@@ -795,13 +772,6 @@ end
 -- The notify remote is the 'Notify' event owned by NotificationController.
 -- The hash rotates but the controller's script name doesn't — so we pull
 -- the live RemoteEvent straight out of its code and listen to ONLY it.
-local function gatherRFs(root)
-    local rfs = {}
-    for _, d in ipairs(root:GetDescendants()) do
-        if d:IsA("RemoteFunction") then table.insert(rfs, d) end
-    end
-    return rfs
-end
 
 local function findNotifyRemote()
     local getinfo = debug and (debug.getinfo or debug.info)
@@ -863,25 +833,83 @@ local function markLocked(re, how)
     print("[Phi] Notify locked (" .. how .. ") ->", re.Name)
 end
 
+-- only react to real broadcast announcements (a sound path + screen position),
+-- so personal notifications like base-lock don't bother the listener
+local POSITIONS = { Top=true, Bottom=true, Center=true, Centre=true, Middle=true,
+                    Left=true, Right=true, TopRight=true, TopLeft=true, BottomRight=true }
+local function looksLikeAnnouncement(...)
+    local a = table.pack(...)
+    if a.n == 0 or typeof(a[1]) ~= "string" then return false end
+    for i = 2, a.n do
+        local v = a[i]
+        if typeof(v) == "string" and (v:find("Sounds%.") or v:find("rbxassetid") or POSITIONS[v]) then return true end
+    end
+    return false
+end
+
 -- find & listen to ONLY the notify remote (nothing else is touched)
 local nr = findNotifyRemote()
 if nr then
     markLocked(nr, "NotificationController")
-    nr.OnClientEvent:Connect(function(...) pcall(handleAnnouncement, "NOTIFY", (...)) end)
+    nr.OnClientEvent:Connect(function(...)
+        if looksLikeAnnouncement(...) then pcall(handleAnnouncement, "NOTIFY", (...)) end
+    end)
 else
     warn("[Phi] notify remote not found — listening disabled. Re-execute, or run find_remote.lua.")
 end
 
--- Redeem RemoteFunction — found by its readable name (no hooks, no spam)
-for _, rf in ipairs(gatherRFs(Net)) do
-    local n = rf.Name:lower()
-    if n:find("redeem") or n:find("redemption") then RedeemRemote = rf; break end
+-- Redeem RemoteFunction — the REAL one is a hashed RF (RequestRedemption is wrong).
+-- Find it via the captured remote, the Codes "Submit" button, or its controller.
+local function findRedeemRemote()
+    if typeof(_G.PhiRedeemRemote) == "Instance" and _G.PhiRedeemRemote:IsA("RemoteFunction") then
+        return _G.PhiRedeemRemote
+    end
+    local getups    = debug and debug.getupvalues
+    local getconsts = debug and debug.getconstants
+    local getinfo   = debug and (debug.getinfo or debug.info)
+    local function rfFrom(fn)
+        local function pick(list, depth)
+            for _, v in pairs(list) do
+                if typeof(v) == "Instance" and v:IsA("RemoteFunction") and v.Name:match("^RF/%x+$") then return v
+                elseif type(v) == "table" and depth > 0 then local r = pick(v, depth - 1); if r then return r end end
+            end
+        end
+        if getups    then local k, u = pcall(getups, fn);    if k then local r = pick(u, 2); if r then return r end end end
+        if getconsts then local k, c = pcall(getconsts, fn); if k then local r = pick(c, 2); if r then return r end end end
+    end
+    -- 1) the Codes "Submit" button's click handler
+    if getconnections then
+        for _, d in ipairs(PG:GetDescendants()) do
+            if d:IsA("TextButton") and tostring(d.Text):lower():find("submit", 1, true) then
+                local ok, conns = pcall(getconnections, d.MouseButton1Click)
+                if ok then for _, c in ipairs(conns) do
+                    local f, fn = pcall(function() return c.Function end)
+                    if f and type(fn) == "function" then local r = rfFrom(fn); if r then return r end end
+                end end
+            end
+        end
+    end
+    -- 2) a code/redeem controller that holds a hashed RemoteFunction
+    if getgc and getinfo then
+        for _, fn in ipairs(getgc(true)) do
+            if type(fn) == "function" then
+                local ok, info = pcall(getinfo, fn)
+                if ok and type(info) == "table" then
+                    local src = tostring(info.short_src or info.source or ""):lower()
+                    if src:find("redempt") or src:find("redeem") or src:find("codecontroller") then
+                        local r = rfFrom(fn); if r then return r end
+                    end
+                end
+            end
+        end
+    end
+    return nil
 end
-if not RedeemRemote then
-    warn("[Phi] Redeem remote not found by name — manual/auto redeem will be disabled.")
-end
+RedeemRemote = findRedeemRemote()
+if RedeemRemote then _G.PhiRedeemRemote = RedeemRemote
+else warn("[Phi] redeem remote not found — run find_redeem_submit.lua (press Submit once).") end
 
 setCStatus("Press " .. bindKey.Name .. " to listen", "idle")
-print(("[Phi] v17 ready — notify=%s, redeem=%s")
+print(("[Phi] v18 ready — notify=%s, redeem=%s")
     :format(NotifyRemote and NotifyRemote.Name or "NOT FOUND",
             RedeemRemote and RedeemRemote.Name or "learn-on-use"))
