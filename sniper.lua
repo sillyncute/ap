@@ -1,11 +1,11 @@
 -- ============================================================
--- PHI AUTOTYPER  v16  (mini)
+-- PHI AUTOTYPER  v17  (mini)
 -- Listens to ONLY the notify remote + uses ONLY the redeem remote — no
 -- other remotes are touched (anti-kick). Found via NotificationController,
 -- so the rotating hash never matters. Press the key (F) to LISTEN; it
 -- live-previews the code in the box and redeems instantly (0 delay).
 -- Settings: keybind, auto-type, MANUAL (press to start / press to fire),
--- CASE (UPPER/lower/EXACT) and WORDS (1/2/3). The + button = TEST SENDER.
+-- CASE (UPPER/lower/EXACT) and WORDS (1/2/3).
 -- ============================================================
 
 local Players          = game:GetService("Players")
@@ -175,23 +175,8 @@ mark.Position = UDim2.new(0, 14, 0.5, 0); mark.BackgroundColor3 = K.txt3
 mark.BorderSizePixel = 0; mark.ZIndex = 12
 corner(5, mark)
 
-local title = label("PHI AUTOTYPER", 12, F.black, K.txt, nil, Head)
-title.Size = UDim2.new(1, -156, 1, 0); title.Position = UDim2.new(0, 32, 0, 0); title.ZIndex = 12
-
--- test-sender button (drawn as a + icon)
-local testBtn = mk("TextButton", Head)
-testBtn.Size = UDim2.new(0, 22, 0, 22); testBtn.AnchorPoint = Vector2.new(1, 0.5)
-testBtn.Position = UDim2.new(1, -94, 0.5, 0); testBtn.BackgroundColor3 = K.bg3
-testBtn.Text = ""; testBtn.BorderSizePixel = 0; testBtn.AutoButtonColor = false; testBtn.ZIndex = 13
-corner(7, testBtn); local testBtnStroke = stroke(testBtn, K.bdr, 1, 0)
-local tHbar = mk("Frame", testBtn); tHbar.Size = UDim2.new(0, 10, 0, 1.8)
-tHbar.AnchorPoint = Vector2.new(0.5, 0.5); tHbar.Position = UDim2.new(0.5, 0, 0.5, 0)
-tHbar.BackgroundColor3 = K.txt2; tHbar.BorderSizePixel = 0; tHbar.ZIndex = 14; corner(1, tHbar)
-local tVbar = mk("Frame", testBtn); tVbar.Size = UDim2.new(0, 1.8, 0, 10)
-tVbar.AnchorPoint = Vector2.new(0.5, 0.5); tVbar.Position = UDim2.new(0.5, 0, 0.5, 0)
-tVbar.BackgroundColor3 = K.txt2; tVbar.BorderSizePixel = 0; tVbar.ZIndex = 14; corner(1, tVbar)
-testBtn.MouseEnter:Connect(function() tw(testBtn, 0.1, {BackgroundColor3 = K.bg4}); tw(testBtnStroke, 0.1, {Color = K.acc}) end)
-testBtn.MouseLeave:Connect(function() tw(testBtn, 0.1, {BackgroundColor3 = K.bg3}); tw(testBtnStroke, 0.1, {Color = K.bdr}) end)
+local title = label("PHI AUTOTYPER", 13, F.black, K.txt, nil, Head)
+title.Size = UDim2.new(1, -120, 1, 0); title.Position = UDim2.new(0, 32, 0, 0); title.ZIndex = 12
 
 -- feed button (drawn as a list icon: dot + line rows)
 local feedBtn = mk("TextButton", Head)
@@ -362,7 +347,7 @@ cStatusDot.Size = UDim2.new(0, 7, 0, 7); cStatusDot.AnchorPoint = Vector2.new(0,
 cStatusDot.Position = UDim2.new(0, 10, 0, 30); cStatusDot.BackgroundColor3 = K.txt3
 cStatusDot.BorderSizePixel = 0; cStatusDot.ZIndex = 13; corner(50, cStatusDot)
 
-local cStatusLbl = label("type a code, or press the key to listen.", 11, F.bold, K.txt, nil, cStatus)
+local cStatusLbl = label("Press F to listen", 11, F.bold, K.txt, nil, cStatus)
 cStatusLbl.Size = UDim2.new(1, -30, 0, 26); cStatusLbl.Position = UDim2.new(0, 22, 0, 17)
 cStatusLbl.TextWrapped = true; cStatusLbl.TextYAlignment = Enum.TextYAlignment.Center; cStatusLbl.ZIndex = 13
 
@@ -375,21 +360,19 @@ local function setCStatus(text, kind)
     else cStatusLbl.TextColor3 = K.txt; cStatusDot.BackgroundColor3 = K.txt3 end
 end
 
--- ── Redeem logic ─────────────────────────────────────────────────
+-- ── Redeem logic (instant, 0 delay) ──────────────────────────────
 local cBusy = false
 local function runRedeem(code, doType)
     if not code or code == "" then setCStatus("no code yet.", "err"); return end
     if doType then CodeBox.Text = code end
-    setCStatus("firing: " .. code, "busy")
-    tw(cRedeem, 0.06, {BackgroundColor3 = K.accPress})
-    local ok, result = redeem(code)
-    tw(cRedeem, 0.1, {BackgroundColor3 = K.acc})
-    if not ok then setCStatus("INVALID OR COOLDOWN: " .. code, "err"); return end
-    if type(result) == "table" then
-        local s = result.success or result.Success
-        if s == true then setCStatus("REDEEMED: " .. code, "ok")
-        else setCStatus("INVALID OR COOLDOWN: " .. code, "err") end
-    else setCStatus("sent: " .. code, "ok") end
+    local ok, result = redeem(code)          -- fired immediately, no delay
+    if not ok then setCStatus("invalid / cooldown", "err"); return end
+    local s = (type(result) == "table") and (result.success or result.Success)
+    if s == true or type(result) ~= "table" then
+        setCStatus("Redeemed", "ok"); CodeBox.Text = "Redeemed"
+    else
+        setCStatus("invalid / cooldown", "err")
+    end
 end
 
 local function getCustomCode()
@@ -440,7 +423,7 @@ local function setMonitor(v)
         resetCollect()
         if manualMode then setCStatus("listening… press " .. bindKey.Name .. " to fire", "wait")
         else setCStatus(("listening… 0/%d"):format(targetWords()), "wait") end
-    else setCStatus("listen off.", "idle") end
+    else setCStatus("Press " .. bindKey.Name .. " to listen", "idle") end
 end
 
 -- redeem an assembled code instantly (applies the CASE setting)
@@ -746,103 +729,6 @@ feedBtn.MouseButton1Click:Connect(function()
     FeedWin.Visible = true
 end)
 
--- ══ TEST SENDER ══════════════════════════════════════════════════
--- Type anything and "send" it as a fake announcement (local only) — it
--- runs through the same handler + feed, so you can test the listen flow.
-local TSW, TSH = 286, 150
-local TestWin = mk("Frame", SG); TestWin.Name = "TestSender"
-TestWin.Size = UDim2.new(0, TSW, 0, TSH)
-TestWin.Position = UDim2.new(0.5, -TSW/2, 0.5, -TSH/2)
-TestWin.BackgroundColor3 = K.bg; TestWin.BackgroundTransparency = 0.12
-TestWin.BorderSizePixel = 0; TestWin.ClipsDescendants = true; TestWin.ZIndex = 20
-TestWin.Visible = false; corner(14, TestWin)
-stroke(TestWin, K.bdr, 1.4, 0.25)
-
-local tHead = mk("Frame", TestWin)
-tHead.Size = UDim2.new(1, 0, 0, 32); tHead.BackgroundColor3 = K.bg1
-tHead.BackgroundTransparency = 0.08; tHead.BorderSizePixel = 0; tHead.ZIndex = 21
-corner(14, tHead)
-local tHeadMask = mk("Frame", tHead); tHeadMask.Size = UDim2.new(1,0,0,10)
-tHeadMask.Position = UDim2.new(0,0,1,-10); tHeadMask.BackgroundColor3 = K.bg1
-tHeadMask.BackgroundTransparency = 0.08; tHeadMask.BorderSizePixel = 0; tHeadMask.ZIndex = 21
-local tTitle = label("TEST SENDER", 11, F.black, K.txt, nil, tHead)
-tTitle.Size = UDim2.new(1, -44, 1, 0); tTitle.Position = UDim2.new(0, 12, 0, 0); tTitle.ZIndex = 22
-local tCloseB = mk("TextButton", tHead)
-tCloseB.Size = UDim2.new(0, 20, 0, 20); tCloseB.AnchorPoint = Vector2.new(1, 0.5)
-tCloseB.Position = UDim2.new(1, -8, 0.5, 0); tCloseB.BackgroundColor3 = K.bg3
-tCloseB.TextColor3 = K.txt2; tCloseB.Font = F.bold; tCloseB.TextSize = 10
-tCloseB.Text = "X"; tCloseB.BorderSizePixel = 0; tCloseB.AutoButtonColor = false; tCloseB.ZIndex = 23
-corner(10, tCloseB); stroke(tCloseB, K.bdr, 1, 0)
-tCloseB.MouseEnter:Connect(function() tw(tCloseB, 0.1, {BackgroundColor3 = K.err, TextColor3 = K.txt}) end)
-tCloseB.MouseLeave:Connect(function() tw(tCloseB, 0.1, {BackgroundColor3 = K.bg3, TextColor3 = K.txt2}) end)
-tCloseB.MouseButton1Click:Connect(function() TestWin.Visible = false end)
-attachDrag(tHead, TestWin)
-
-local tHint = label("fires a real popup (local only) — type to test", 8, F.med, K.txt3, nil, TestWin)
-tHint.Size = UDim2.new(1, -24, 0, 12); tHint.Position = UDim2.new(0, 12, 0, 38); tHint.ZIndex = 21
-
-local tInput = mk("TextBox", TestWin)
-tInput.Size = UDim2.new(1, -24, 0, 34); tInput.Position = UDim2.new(0, 12, 0, 54)
-tInput.BackgroundColor3 = K.input; tInput.BorderSizePixel = 0
-tInput.PlaceholderText = "type a word or message…"
-tInput.PlaceholderColor3 = Color3.fromRGB(110,112,122)
-tInput.Text = ""; tInput.TextColor3 = K.txt; tInput.Font = F.bold; tInput.TextSize = 13
-tInput.ClearTextOnFocus = false; tInput.ZIndex = 22; tInput.TextXAlignment = Enum.TextXAlignment.Left
-corner(6, tInput)
-local tiPad = mk("UIPadding", tInput); tiPad.PaddingLeft = UDim.new(0,8); tiPad.PaddingRight = UDim.new(0,8)
-local tiStroke = stroke(tInput, K.bdr, 1.2, 0.25)
-tInput.Focused:Connect(function() tw(tiStroke, 0.12, {Color = K.acc, Transparency = 0.05}) end)
-tInput.FocusLost:Connect(function() tw(tiStroke, 0.12, {Color = K.bdr, Transparency = 0.25}) end)
-
-local tSend = mk("TextButton", TestWin)
-tSend.Size = UDim2.new(0, 152, 0, 30); tSend.Position = UDim2.new(0, 12, 1, -38)
-tSend.BackgroundColor3 = K.acc; tSend.BorderSizePixel = 0
-tSend.Text = "SEND"; tSend.TextColor3 = Color3.fromRGB(18,18,22)
-tSend.Font = F.black; tSend.TextSize = 11; tSend.AutoButtonColor = false; tSend.ZIndex = 22
-corner(6, tSend); stroke(tSend, K.accHov, 1.2, 0.4)
-tSend.MouseEnter:Connect(function() tw(tSend, 0.08, {BackgroundColor3 = K.accHov}) end)
-tSend.MouseLeave:Connect(function() tw(tSend, 0.08, {BackgroundColor3 = K.acc}) end)
-
--- TEST CODE: fires a random code announcement so you can test auto-redeem
-local tCode = mk("TextButton", TestWin)
-tCode.Size = UDim2.new(0, 98, 0, 30); tCode.Position = UDim2.new(0, 176, 1, -38)
-tCode.BackgroundColor3 = K.bg3; tCode.BorderSizePixel = 0
-tCode.Text = "TEST CODE"; tCode.TextColor3 = K.txt
-tCode.Font = F.black; tCode.TextSize = 10; tCode.AutoButtonColor = false; tCode.ZIndex = 22
-corner(6, tCode); stroke(tCode, K.bdr, 1.2, 0.2)
-tCode.MouseEnter:Connect(function() tw(tCode, 0.1, {BackgroundColor3 = K.bg4, TextColor3 = K.accHov}) end)
-tCode.MouseLeave:Connect(function() tw(tCode, 0.1, {BackgroundColor3 = K.bg3, TextColor3 = K.txt}) end)
-
-local function fireAnnouncement(txt)
-    txt = (txt or ""):gsub("^%s+",""):gsub("%s+$","")
-    if txt == "" then return end
-    local re = NotifyRemote or _G.PhiNotifyRemote
-    if re and typeof(firesignal) == "function" then
-        firesignal(re.OnClientEvent, txt, 5.5, "Sounds.Sfx.Blop", "Top", 2678001507)  -- real popup + feed
-    else
-        handleAnnouncement("TEST", txt)          -- fallback: inject directly (no popup)
-    end
-end
-local function sendTest()
-    fireAnnouncement(tInput.Text)
-    tInput.Text = ""; tInput:CaptureFocus()
-end
-tCode.MouseButton1Click:Connect(function()
-    local code = "TESTCODE" .. tostring(math.random(1000, 9999))
-    addFeedEntry("[test code] " .. code, code)
-    fireAssembled(code)   -- runs the auto-redeem path: INSTA on -> redeems, off -> types
-end)
-tSend.MouseButton1Click:Connect(sendTest)
-tInput.FocusLost:Connect(function(enter) if enter then sendTest() end end)
-
-testBtn.MouseButton1Click:Connect(function()
-    if TestWin.Visible then TestWin.Visible = false; return end
-    local mp = Main.Position
-    TestWin.Position = UDim2.new(mp.X.Scale, mp.X.Offset - TSW - 12, mp.Y.Scale, mp.Y.Offset)
-    TestWin.Visible = true
-    tInput:CaptureFocus()
-end)
-
 -- ── Keybind input (toggle monitor + rebind capture) ──────────────
 UserInputService.InputBegan:Connect(function(input, gpe)
     if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
@@ -995,7 +881,7 @@ if not RedeemRemote then
     warn("[Phi] Redeem remote not found by name — manual/auto redeem will be disabled.")
 end
 
-setCStatus("press " .. bindKey.Name .. " to listen, or type a code.", "idle")
-print(("[Phi] v16 ready — notify=%s, redeem=%s")
+setCStatus("Press " .. bindKey.Name .. " to listen", "idle")
+print(("[Phi] v17 ready — notify=%s, redeem=%s")
     :format(NotifyRemote and NotifyRemote.Name or "NOT FOUND",
             RedeemRemote and RedeemRemote.Name or "learn-on-use"))
