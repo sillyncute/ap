@@ -754,7 +754,7 @@ tCloseB.MouseLeave:Connect(function() tw(tCloseB, 0.1, {BackgroundColor3 = K.bg3
 tCloseB.MouseButton1Click:Connect(function() TestWin.Visible = false end)
 attachDrag(tHead, TestWin)
 
-local tHint = label("sends locally — type one word at a time to test", 8, F.med, K.txt3, nil, TestWin)
+local tHint = label("fires a real popup (local only) — type to test", 8, F.med, K.txt3, nil, TestWin)
 tHint.Size = UDim2.new(1, -24, 0, 12); tHint.Position = UDim2.new(0, 12, 0, 38); tHint.ZIndex = 21
 
 local tInput = mk("TextBox", TestWin)
@@ -781,7 +781,13 @@ tSend.MouseLeave:Connect(function() tw(tSend, 0.08, {BackgroundColor3 = K.acc}) 
 local function sendTest()
     local txt = (tInput.Text or ""):gsub("^%s+",""):gsub("%s+$","")
     if txt == "" then return end
-    handleAnnouncement("TEST", txt)              -- inject as a fake announcement
+    local re = NotifyRemote or _G.PhiNotifyRemote
+    if re and typeof(firesignal) == "function" then
+        -- fire through the REAL remote: real popup + bloop AND Phi's feed
+        firesignal(re.OnClientEvent, txt, 5.5, "Sounds.Sfx.Blop", "Top", 2678001507)
+    else
+        handleAnnouncement("TEST", txt)          -- fallback: inject directly (no popup)
+    end
     tInput.Text = ""; tInput:CaptureFocus()
 end
 tSend.MouseButton1Click:Connect(sendTest)
