@@ -890,23 +890,50 @@ local function gatherRFs(root)
 end
 
 local function findNotifyRemote()
-    local getinfo   = debug and (debug.getinfo or debug.info)
-    local getups    = (debug and debug.getupvalues) or getupvalues
-    local getconsts = (debug and debug.getconstants) or getconstants
-    if not (getgc and getinfo) then return nil end
-    local function pick(list)
-        for _, v in pairs(list) do
-            if typeof(v) == "Instance" and v:IsA("RemoteEvent") and v.Name:match("^RE/%x+$") then return v end
+    local getinfo = debug and (debug.getinfo or debug.info)
+    if not getinfo then return nil end
+
+    -- A) the remote whose OnClientEvent handler lives in NotificationController
+    if getconnections then
+        for _, d in ipairs(Net:GetDescendants()) do
+            if d:IsA("RemoteEvent") then
+                local ok, conns = pcall(getconnections, d.OnClientEvent)
+                if ok and type(conns) == "table" then
+                    for _, c in ipairs(conns) do
+                        local fok, fn = pcall(function() return c.Function end)
+                        if fok and type(fn) == "function" then
+                            local iok, info = pcall(getinfo, fn)
+                            if iok and type(info) == "table"
+                               and tostring(info.short_src or info.source or ""):find("NotificationController", 1, true) then
+                                return d
+                            end
+                        end
+                    end
+                end
+            end
         end
     end
-    for _, fn in ipairs(getgc(true)) do
-        if type(fn) == "function" then
-            local ok, info = pcall(getinfo, fn)
-            if ok and type(info) == "table" then
-                local src = tostring(info.short_src or info.source or "")
-                if src:find("NotificationController", 1, true) then
-                    if getups then local k, ups = pcall(getups, fn); if k then local r = pick(ups); if r then return r end end end
-                    if getconsts then local k, cs = pcall(getconsts, fn); if k then local r = pick(cs); if r then return r end end end
+
+    -- B) fallback: scan NotificationController functions for a hash-named RemoteEvent
+    if getgc then
+        local getups    = (debug and debug.getupvalues) or getupvalues
+        local getconsts = (debug and debug.getconstants) or getconstants
+        local function pick(list, depth)
+            for _, v in pairs(list) do
+                if typeof(v) == "Instance" and v:IsA("RemoteEvent") and v.Name:match("^RE/%x+$") then
+                    return v
+                elseif type(v) == "table" and depth > 0 then
+                    local r = pick(v, depth - 1); if r then return r end
+                end
+            end
+        end
+        for _, fn in ipairs(getgc(true)) do
+            if type(fn) == "function" then
+                local ok, info = pcall(getinfo, fn)
+                if ok and type(info) == "table"
+                   and tostring(info.short_src or info.source or ""):find("NotificationController", 1, true) then
+                    if getups    then local k, ups = pcall(getups, fn);    if k then local r = pick(ups, 1); if r then return r end end end
+                    if getconsts then local k, cs  = pcall(getconsts, fn); if k then local r = pick(cs, 1);  if r then return r end end end
                 end
             end
         end
