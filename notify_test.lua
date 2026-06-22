@@ -1,37 +1,50 @@
 -- ============================================================
--- PHI NOTIFY TEST  (feed + listen)
--- Fires FAKE announcements through the ACTUAL notify remote so the game
--- draws real popups AND Phi catches them into the LIVE FEED.
---
--- Auto-uses the remote Phi locked on load (_G.PhiNotifyRemote) — no hash.
--- Just load Phi first, then run this.
---
---   • To test the FEED:   open the LIVE FEED, run this, watch it fill.
---   • To test LISTEN:     turn LISTEN on + set WORDS=2, then run this —
---                         "octo" + "1234" assemble into OCTO1234 and fire.
+-- PHI NOTIFY TEST  (real remote, auto-found)
+-- Fires ONE fake announcement (with an embedded TESTCODE) through the
+-- ACTUAL notify remote. Confirm two ways:
+--   1) does a notification popup appear on screen?  -> it IS the remote
+--   2) does Phi catch the embedded code?            -> Phi is listening
+-- Auto-resolves the real remote (no hash to paste): uses the one Phi
+-- locked (_G.PhiNotifyRemote), else finds it via NotificationController.
 -- firesignal is LOCAL — nothing reaches the server.
 -- ============================================================
 
 local RS  = game:GetService("ReplicatedStorage")
 local Net = RS:WaitForChild("Packages"):WaitForChild("Net")
 
--- only used if Phi hasn't locked the remote yet (paste the locked name)
-local FALLBACK_NAME = ""
-
--- the announcements to fire, in order, one per line
-local MESSAGES = {
-    "octo",
-    "1234",
-    "GET THIS CODE everyone redeem fast",
-    "FREEGEMS2024",
-}
-local GAP = 0.8   -- seconds between each
-
+-- 1) prefer the remote Phi already locked
 local remote = _G.PhiNotifyRemote
-if not remote and FALLBACK_NAME ~= "" then remote = Net:FindFirstChild(FALLBACK_NAME) end
+
+-- 2) else find it ourselves via NotificationController (deterministic)
 if not remote then
-    warn("[Test] No notify remote yet. Load Phi first (it finds it on load via")
-    warn("[Test] NotificationController), then re-run. Or set FALLBACK_NAME above.")
+    local getinfo   = debug and (debug.getinfo or debug.info)
+    local getups    = (debug and debug.getupvalues) or getupvalues
+    local getconsts = (debug and debug.getconstants) or getconstants
+    if getgc and getinfo then
+        local function pick(list)
+            for _, v in pairs(list) do
+                if typeof(v) == "Instance" and v:IsA("RemoteEvent") and v.Name:match("^RE/%x+$") then return v end
+            end
+        end
+        for _, fn in ipairs(getgc(true)) do
+            if type(fn) == "function" then
+                local ok, info = pcall(getinfo, fn)
+                if ok and type(info) == "table" then
+                    local src = tostring(info.short_src or info.source or "")
+                    if src:find("NotificationController", 1, true) then
+                        if getups then local k, ups = pcall(getups, fn); if k then remote = pick(ups) end end
+                        if not remote and getconsts then local k, cs = pcall(getconsts, fn); if k then remote = pick(cs) end end
+                        if remote then break end
+                    end
+                end
+            end
+        end
+    end
+end
+
+if not remote then
+    warn("[Test] Couldn't resolve the notify remote. Load Phi first (it sets")
+    warn("[Test] _G.PhiNotifyRemote on load), then re-run this.")
     return
 end
 if typeof(firesignal) ~= "function" then
@@ -39,14 +52,19 @@ if typeof(firesignal) ~= "function" then
     return
 end
 
-print("[Test] Using remote:", remote.Name)
-print("[Test] Firing " .. #MESSAGES .. " announcement(s)…")
+local code = "TESTCODE" .. tostring(math.random(1000, 9999))
+local msg  = "TEST ANNOUNCEMENT — redeem " .. code .. " right now lol"
 
-task.spawn(function()
-    for i, msg in ipairs(MESSAGES) do
-        firesignal(remote.OnClientEvent, msg, 5.5, "Sounds.Sfx.Blop", "Top", 2678001507)
-        print("[Test] sent " .. i .. "/" .. #MESSAGES .. ": " .. msg)
-        task.wait(GAP)
-    end
-    print("[Test] done — check the LIVE FEED.")
-end)
+print("=========================================")
+print("[Test] Firing through REAL remote:")
+print("[Test]   " .. remote.Name)
+print("[Test] embedded code = " .. code)
+print("[Test] WATCH FOR:")
+print("[Test]   1) a notification popup on screen with the message above")
+print("[Test]   2) Phi status / feed catching " .. code)
+print("=========================================")
+
+-- payload shape: (text, duration, sound, position, soundId)
+firesignal(remote.OnClientEvent, msg, 5.5, "Sounds.Sfx.Blop", "Top", 2678001507)
+
+print("[Test] sent. If NO popup appeared, this remote is NOT the notification one.")
