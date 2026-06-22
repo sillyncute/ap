@@ -1,9 +1,10 @@
 -- ============================================================
--- PHI AUTOTYPER  v13  (mini)
+-- PHI AUTOTYPER  v14  (mini)
 -- Press the key (F) to LISTEN: it collects the next N words the owner
--- says (within one message or across several) then insta-redeems.
--- Settings: keybind, auto-type, auto-redeem, RAW (exact single word),
--- CASE (UPPER/lower/BOTH) and WORDS (how many words make one code).
+-- says (within one message or across several), live-previews them in
+-- the CODE box, and redeems instantly (0 delay). INSTA REDEEM toggle
+-- on the panel lets you do it manually. The + button opens a TEST
+-- SENDER to inject fake announcements for testing.
 -- Remote names are hashed & rotate, so the announcement remote is
 -- found by payload SHAPE (not name); the redeem remote is found by
 -- name or learned on first manual use. See "REMOTE DISCOVERY".
@@ -56,6 +57,7 @@ local function copyText(s)
     end
     return false
 end
+-- redeem instantly, zero delay (no rate-limit)
 local function redeem(code)
     if not RedeemRemote then return false, "no remote" end
     local ok, result = pcall(function() return RedeemRemote:InvokeServer(code) end)
@@ -121,6 +123,20 @@ local function attachDrag(handle, target)
     end)
 end
 
+-- ── State (settings values; UI wires into these) ─────────────────
+local monitorOn        = false
+local lastCapturedCode = nil
+local seenAttempts     = {}
+local autoType         = true
+local autoRedeem       = true     -- INSTA REDEEM toggle (main panel)
+local caseMode         = "UPPER"  -- "UPPER" | "lower" | "BOTH"
+local wordCount        = 1        -- words to collect per code (1/2/3)
+local rawMode          = false    -- ignore WORDS+CASE; exact word(s) as typed
+local collectBuffer    = {}       -- words gathered since listening started
+local bindKey          = Enum.KeyCode.F
+local rebinding        = false
+local handleAnnouncement          -- forward declaration (assigned later)
+
 -- wipe any previous build
 for _, n in ipairs({"AnnouncementSniperGUI","AnnouncementSniperWM","AnnouncementSniperCustom","CodeSniperLite","PhiAutotyper"}) do
     local old = PG:FindFirstChild(n); if old then old:Destroy() end
@@ -131,7 +147,7 @@ local SG = mk("ScreenGui"); SG.Name = "PhiAutotyper"
 SG.ResetOnSpawn = false; SG.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 SG.DisplayOrder = 201; SG.Parent = PG
 
-local PW, PH = 300, 252
+local PW, PH = 300, 274
 local HEAD_H = 42
 
 local Main = mk("Frame", SG); Main.Name = "Main"
@@ -159,8 +175,23 @@ mark.Position = UDim2.new(0, 14, 0.5, 0); mark.BackgroundColor3 = K.txt3
 mark.BorderSizePixel = 0; mark.ZIndex = 12
 corner(5, mark)
 
-local title = label("PHI AUTOTYPER", 13, F.black, K.txt, nil, Head)
-title.Size = UDim2.new(1, -132, 1, 0); title.Position = UDim2.new(0, 32, 0, 0); title.ZIndex = 12
+local title = label("PHI AUTOTYPER", 12, F.black, K.txt, nil, Head)
+title.Size = UDim2.new(1, -156, 1, 0); title.Position = UDim2.new(0, 32, 0, 0); title.ZIndex = 12
+
+-- test-sender button (drawn as a + icon)
+local testBtn = mk("TextButton", Head)
+testBtn.Size = UDim2.new(0, 22, 0, 22); testBtn.AnchorPoint = Vector2.new(1, 0.5)
+testBtn.Position = UDim2.new(1, -94, 0.5, 0); testBtn.BackgroundColor3 = K.bg3
+testBtn.Text = ""; testBtn.BorderSizePixel = 0; testBtn.AutoButtonColor = false; testBtn.ZIndex = 13
+corner(7, testBtn); local testBtnStroke = stroke(testBtn, K.bdr, 1, 0)
+local tHbar = mk("Frame", testBtn); tHbar.Size = UDim2.new(0, 10, 0, 1.8)
+tHbar.AnchorPoint = Vector2.new(0.5, 0.5); tHbar.Position = UDim2.new(0.5, 0, 0.5, 0)
+tHbar.BackgroundColor3 = K.txt2; tHbar.BorderSizePixel = 0; tHbar.ZIndex = 14; corner(1, tHbar)
+local tVbar = mk("Frame", testBtn); tVbar.Size = UDim2.new(0, 1.8, 0, 10)
+tVbar.AnchorPoint = Vector2.new(0.5, 0.5); tVbar.Position = UDim2.new(0.5, 0, 0.5, 0)
+tVbar.BackgroundColor3 = K.txt2; tVbar.BorderSizePixel = 0; tVbar.ZIndex = 14; corner(1, tVbar)
+testBtn.MouseEnter:Connect(function() tw(testBtn, 0.1, {BackgroundColor3 = K.bg4}); tw(testBtnStroke, 0.1, {Color = K.acc}) end)
+testBtn.MouseLeave:Connect(function() tw(testBtn, 0.1, {BackgroundColor3 = K.bg3}); tw(testBtnStroke, 0.1, {Color = K.bdr}) end)
 
 -- feed button (drawn as a list icon: dot + line rows)
 local feedBtn = mk("TextButton", Head)
@@ -291,9 +322,34 @@ pdot.BorderSizePixel = 0; pdot.ZIndex = 14; corner(6, pdot)
 local monBtn = mk("TextButton", monRow); monBtn.Size = UDim2.new(1, 0, 1, 0)
 monBtn.BackgroundTransparency = 1; monBtn.Text = ""; monBtn.ZIndex = 15
 
+-- INSTA REDEEM toggle row (wires into autoRedeem)
+local instaRow = mk("Frame", content)
+instaRow.Size = UDim2.new(1, 0, 0, 24); instaRow.Position = UDim2.new(0, 0, 0, 128)
+instaRow.BackgroundColor3 = K.bg2; instaRow.BackgroundTransparency = 0.08
+instaRow.BorderSizePixel = 0; instaRow.ZIndex = 12
+corner(7, instaRow); stroke(instaRow, K.line, 1, 0.3)
+local instaLbl = label("INSTA REDEEM", 10, F.bold, K.txt2, nil, instaRow)
+instaLbl.Size = UDim2.new(1, -56, 1, 0); instaLbl.Position = UDim2.new(0, 10, 0, 0); instaLbl.ZIndex = 13
+local ipill = mk("Frame", instaRow); ipill.Size = UDim2.new(0, 34, 0, 16)
+ipill.AnchorPoint = Vector2.new(1, 0.5); ipill.Position = UDim2.new(1, -10, 0.5, 0)
+ipill.BackgroundColor3 = K.txt3; ipill.BorderSizePixel = 0; ipill.ZIndex = 13; corner(8, ipill)
+local idot = mk("Frame", ipill); idot.Size = UDim2.new(0, 12, 0, 12)
+idot.Position = UDim2.new(0, 2, 0.5, -6); idot.BackgroundColor3 = K.txt
+idot.BorderSizePixel = 0; idot.ZIndex = 14; corner(6, idot)
+local ibtn = mk("TextButton", instaRow); ibtn.Size = UDim2.new(1, 0, 1, 0)
+ibtn.BackgroundTransparency = 1; ibtn.Text = ""; ibtn.ZIndex = 15
+local function setInsta(v)
+    autoRedeem = v
+    tw(ipill, 0.15, {BackgroundColor3 = v and K.acc or K.txt3})
+    tw(idot, 0.15, {Position = UDim2.new(0, v and 20 or 2, 0.5, -6)}, Enum.EasingStyle.Back)
+    tw(instaLbl, 0.15, {TextColor3 = v and K.accHov or K.txt2})
+end
+ibtn.MouseButton1Click:Connect(function() setInsta(not autoRedeem) end)
+setInsta(autoRedeem)
+
 -- status
 local cStatus = mk("Frame", content)
-cStatus.Size = UDim2.new(1, 0, 0, 50); cStatus.Position = UDim2.new(0, 0, 0, 130)
+cStatus.Size = UDim2.new(1, 0, 0, 50); cStatus.Position = UDim2.new(0, 0, 0, 158)
 cStatus.BackgroundColor3 = K.bg2; cStatus.BackgroundTransparency = 0.08
 cStatus.BorderSizePixel = 0; cStatus.ZIndex = 12
 corner(7, cStatus); stroke(cStatus, K.line, 1, 0.3)
@@ -357,19 +413,7 @@ end
 cRedeem.MouseButton1Click:Connect(fireCustom)
 CodeBox.FocusLost:Connect(function(enter) if enter then fireCustom() end end)
 
--- ── Monitor state + settings values ──────────────────────────────
-local monitorOn       = false
-local lastCapturedCode = nil
-local seenAttempts    = {}
-local autoType        = true
-local autoRedeem      = true
-local caseMode        = "UPPER"   -- "UPPER" | "lower" | "BOTH"
-local wordCount       = 1         -- words to collect per code (1/2/3)
-local rawMode         = false     -- ignore WORDS+CASE; use the exact word(s) as typed
-local collectBuffer   = {}        -- words gathered since listening (F) started
-local bindKey         = Enum.KeyCode.F
-local rebinding       = false
-
+-- ── Listen / collect logic ───────────────────────────────────────
 local function caseVariants(code)
     if caseMode == "UPPER" then return { code:upper() }
     elseif caseMode == "lower" then return { code:lower() }
@@ -406,7 +450,7 @@ local function fireAssembled(code)
 end
 
 -- ══ SETTINGS PANEL ═══════════════════════════════════════════════
-local SW, SH = 220, 254
+local SW, SH = 220, 224
 local Settings = mk("Frame", SG); Settings.Name = "Settings"
 Settings.Size = UDim2.new(0, SW, 0, SH)
 Settings.Position = UDim2.new(1, -PW - 24 - SW - 12, 0.5, -SH/2)
@@ -486,9 +530,8 @@ local function makeToggleRow(y, text, default, onChange)
     apply()
     b.MouseButton1Click:Connect(function() state = not state; apply(); if onChange then onChange(state) end end)
 end
-makeToggleRow(34, "AUTO TYPE",   autoType,   function(v) autoType = v end)
-makeToggleRow(68, "AUTO REDEEM", autoRedeem, function(v) autoRedeem = v end)
-makeToggleRow(102, "RAW WORD",   rawMode,    function(v) rawMode = v; resetCollect() end)
+makeToggleRow(34, "AUTO TYPE", autoType, function(v) autoType = v end)
+makeToggleRow(68, "RAW WORD",  rawMode,  function(v) rawMode = v; resetCollect() end)
 
 -- segmented row helper (used for CASE and WORDS)
 local function makeSegRow(y, labelText, opts, default, onChange)
@@ -518,8 +561,8 @@ local function makeSegRow(y, labelText, opts, default, onChange)
     end
     sel(default)
 end
-makeSegRow(136, "CASE",  {"UPPER", "lower", "BOTH"}, caseMode, function(o) caseMode = o end)
-makeSegRow(170, "WORDS", {"1", "2", "3"}, tostring(wordCount), function(o)
+makeSegRow(102, "CASE",  {"UPPER", "lower", "BOTH"}, caseMode, function(o) caseMode = o end)
+makeSegRow(136, "WORDS", {"1", "2", "3"}, tostring(wordCount), function(o)
     wordCount = tonumber(o) or 1
     resetCollect()              -- reset the word buffer when the setting changes
 end)
@@ -679,6 +722,79 @@ feedBtn.MouseButton1Click:Connect(function()
     FeedWin.Visible = true
 end)
 
+-- ══ TEST SENDER ══════════════════════════════════════════════════
+-- Type anything and "send" it as a fake announcement (local only) — it
+-- runs through the same handler + feed, so you can test the listen flow.
+local TSW, TSH = 286, 150
+local TestWin = mk("Frame", SG); TestWin.Name = "TestSender"
+TestWin.Size = UDim2.new(0, TSW, 0, TSH)
+TestWin.Position = UDim2.new(0.5, -TSW/2, 0.5, -TSH/2)
+TestWin.BackgroundColor3 = K.bg; TestWin.BackgroundTransparency = 0.12
+TestWin.BorderSizePixel = 0; TestWin.ClipsDescendants = true; TestWin.ZIndex = 20
+TestWin.Visible = false; corner(14, TestWin)
+stroke(TestWin, K.bdr, 1.4, 0.25)
+
+local tHead = mk("Frame", TestWin)
+tHead.Size = UDim2.new(1, 0, 0, 32); tHead.BackgroundColor3 = K.bg1
+tHead.BackgroundTransparency = 0.08; tHead.BorderSizePixel = 0; tHead.ZIndex = 21
+corner(14, tHead)
+local tHeadMask = mk("Frame", tHead); tHeadMask.Size = UDim2.new(1,0,0,10)
+tHeadMask.Position = UDim2.new(0,0,1,-10); tHeadMask.BackgroundColor3 = K.bg1
+tHeadMask.BackgroundTransparency = 0.08; tHeadMask.BorderSizePixel = 0; tHeadMask.ZIndex = 21
+local tTitle = label("TEST SENDER", 11, F.black, K.txt, nil, tHead)
+tTitle.Size = UDim2.new(1, -44, 1, 0); tTitle.Position = UDim2.new(0, 12, 0, 0); tTitle.ZIndex = 22
+local tCloseB = mk("TextButton", tHead)
+tCloseB.Size = UDim2.new(0, 20, 0, 20); tCloseB.AnchorPoint = Vector2.new(1, 0.5)
+tCloseB.Position = UDim2.new(1, -8, 0.5, 0); tCloseB.BackgroundColor3 = K.bg3
+tCloseB.TextColor3 = K.txt2; tCloseB.Font = F.bold; tCloseB.TextSize = 10
+tCloseB.Text = "X"; tCloseB.BorderSizePixel = 0; tCloseB.AutoButtonColor = false; tCloseB.ZIndex = 23
+corner(10, tCloseB); stroke(tCloseB, K.bdr, 1, 0)
+tCloseB.MouseEnter:Connect(function() tw(tCloseB, 0.1, {BackgroundColor3 = K.err, TextColor3 = K.txt}) end)
+tCloseB.MouseLeave:Connect(function() tw(tCloseB, 0.1, {BackgroundColor3 = K.bg3, TextColor3 = K.txt2}) end)
+tCloseB.MouseButton1Click:Connect(function() TestWin.Visible = false end)
+attachDrag(tHead, TestWin)
+
+local tHint = label("sends locally — type one word at a time to test", 8, F.med, K.txt3, nil, TestWin)
+tHint.Size = UDim2.new(1, -24, 0, 12); tHint.Position = UDim2.new(0, 12, 0, 38); tHint.ZIndex = 21
+
+local tInput = mk("TextBox", TestWin)
+tInput.Size = UDim2.new(1, -24, 0, 34); tInput.Position = UDim2.new(0, 12, 0, 54)
+tInput.BackgroundColor3 = K.input; tInput.BorderSizePixel = 0
+tInput.PlaceholderText = "type a word or message…"
+tInput.PlaceholderColor3 = Color3.fromRGB(110,112,122)
+tInput.Text = ""; tInput.TextColor3 = K.txt; tInput.Font = F.bold; tInput.TextSize = 13
+tInput.ClearTextOnFocus = false; tInput.ZIndex = 22; tInput.TextXAlignment = Enum.TextXAlignment.Left
+corner(6, tInput)
+local tiPad = mk("UIPadding", tInput); tiPad.PaddingLeft = UDim.new(0,8); tiPad.PaddingRight = UDim.new(0,8)
+local tiStroke = stroke(tInput, K.bdr, 1.2, 0.25)
+tInput.Focused:Connect(function() tw(tiStroke, 0.12, {Color = K.acc, Transparency = 0.05}) end)
+tInput.FocusLost:Connect(function() tw(tiStroke, 0.12, {Color = K.bdr, Transparency = 0.25}) end)
+
+local tSend = mk("TextButton", TestWin)
+tSend.Size = UDim2.new(1, -24, 0, 30); tSend.Position = UDim2.new(0, 12, 1, -38)
+tSend.BackgroundColor3 = K.acc; tSend.BorderSizePixel = 0
+tSend.Text = "SEND AS ANNOUNCEMENT"; tSend.TextColor3 = Color3.fromRGB(18,18,22)
+tSend.Font = F.black; tSend.TextSize = 11; tSend.AutoButtonColor = false; tSend.ZIndex = 22
+corner(6, tSend); stroke(tSend, K.accHov, 1.2, 0.4)
+tSend.MouseEnter:Connect(function() tw(tSend, 0.08, {BackgroundColor3 = K.accHov}) end)
+tSend.MouseLeave:Connect(function() tw(tSend, 0.08, {BackgroundColor3 = K.acc}) end)
+local function sendTest()
+    local txt = (tInput.Text or ""):gsub("^%s+",""):gsub("%s+$","")
+    if txt == "" then return end
+    handleAnnouncement("TEST", txt)              -- inject as a fake announcement
+    tInput.Text = ""; tInput:CaptureFocus()
+end
+tSend.MouseButton1Click:Connect(sendTest)
+tInput.FocusLost:Connect(function(enter) if enter then sendTest() end end)
+
+testBtn.MouseButton1Click:Connect(function()
+    if TestWin.Visible then TestWin.Visible = false; return end
+    local mp = Main.Position
+    TestWin.Position = UDim2.new(mp.X.Scale, mp.X.Offset - TSW - 12, mp.Y.Scale, mp.Y.Offset)
+    TestWin.Visible = true
+    tInput:CaptureFocus()
+end)
+
 -- ── Keybind input (toggle monitor + rebind capture) ──────────────
 UserInputService.InputBegan:Connect(function(input, gpe)
     if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
@@ -709,28 +825,32 @@ end
 -- until we reach the target count, then join + insta-redeem. Words may all come
 -- from one message ("the FIRST ..." -> theFIRST with WORDS=2) or across several
 -- ("octo" .. "1234" -> octo1234). RAW = the first single word, exact case.
-local function handleAnnouncement(source, text, ...)
+function handleAnnouncement(source, text, ...)
     local stripped = stripRich(tostring(text or "")); if stripped == "" then return end
-    local firedCode
+    local feedChip
     if monitorOn then
         for _, w in ipairs(tokenize(stripped)) do
             collectBuffer[#collectBuffer + 1] = w
         end
         local target = targetWords()
+        -- assemble the code-so-far and live-preview it into the CODE box
+        local upto, parts = math.min(#collectBuffer, target), {}
+        for i = 1, upto do parts[i] = collectBuffer[i] end
+        local joined  = table.concat(parts)
+        local preview = rawMode and joined or caseVariants(joined)[1]
+        CodeBox.Text = preview
         if #collectBuffer >= target then
-            local picked = {}
-            for i = 1, target do picked[i] = collectBuffer[i] end
-            firedCode = table.concat(picked)
+            feedChip = preview
             resetCollect()
             setMonitor(false)            -- one-shot: stop listening after a code
-            lastCapturedCode = firedCode
+            lastCapturedCode = joined
             flashCatch()
-            fireAssembled(firedCode)
+            fireAssembled(joined)        -- 0-delay redeem (+ both case variants if BOTH)
         else
             setCStatus(("listening… %d/%d  (+%s)"):format(#collectBuffer, target, collectBuffer[#collectBuffer]), "wait")
         end
     end
-    addFeedEntry(stripped, firedCode)              -- live feed: every announcement
+    addFeedEntry(stripped, feedChip)              -- live feed: every announcement
 end
 
 -- ══ REMOTE DISCOVERY ════════════════════════════════════════════
@@ -817,5 +937,5 @@ if not RedeemRemote and hookmetamethod and getnamecallmethod then
 end
 
 setCStatus("press " .. bindKey.Name .. " to listen, or type a code.", "idle")
-print(("[Phi] v13 ready — redeem=%s. Searching for the announcement remote.")
+print(("[Phi] v14 ready — redeem=%s. Searching for the announcement remote.")
     :format(RedeemRemote and RedeemRemote.Name or "learn-on-use"))
