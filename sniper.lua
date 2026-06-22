@@ -869,12 +869,13 @@ end
 -- (a readable RemoteEvent that doesn't rotate); prefer that. Fall back to the
 -- captured remote, the Codes "Submit" button, or a controller.
 local function findRedeemRemote()
-    for _, name in ipairs({ "RE/StockEventService/Redeem", "RF/RequestRedemption" }) do
-        local r = Net:FindFirstChild(name); if r then return r end
-    end
+    -- probe/capture result wins
     if typeof(_G.PhiRedeemRemote) == "Instance"
        and (_G.PhiRedeemRemote:IsA("RemoteFunction") or _G.PhiRedeemRemote:IsA("RemoteEvent")) then
         return _G.PhiRedeemRemote
+    end
+    for _, name in ipairs({ "RE/StockEventService/Redeem", "RF/RequestRedemption" }) do
+        local r = Net:FindFirstChild(name); if r then return r end
     end
     local getups    = debug and debug.getupvalues
     local getconsts = debug and debug.getconstants
