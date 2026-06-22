@@ -1,13 +1,11 @@
 -- ============================================================
--- PHI AUTOTYPER  v15  (mini)
--- Listens to ONLY the NotificationController 'Notify' remote (found via
--- its script, so the rotating hash never matters). Press the key (F) to
--- LISTEN: it collects the next N words the owner says, live-previews them
--- in the CODE box, and redeems instantly (0 delay). INSTA REDEEM toggle
--- lets you do it manually. The + button opens a TEST SENDER.
--- Remote names are hashed & rotate, so the announcement remote is
--- found by payload SHAPE (not name); the redeem remote is found by
--- name or learned on first manual use. See "REMOTE DISCOVERY".
+-- PHI AUTOTYPER  v16  (mini)
+-- Listens to ONLY the notify remote + uses ONLY the redeem remote — no
+-- other remotes are touched (anti-kick). Found via NotificationController,
+-- so the rotating hash never matters. Press the key (F) to LISTEN; it
+-- live-previews the code in the box and redeems instantly (0 delay).
+-- Settings: keybind, auto-type, MANUAL (press to start / press to fire),
+-- CASE (UPPER/lower/EXACT) and WORDS (1/2/3). The + button = TEST SENDER.
 -- ============================================================
 
 local Players          = game:GetService("Players")
@@ -72,27 +70,27 @@ local function pickFont(getter, fallback)
     return fallback
 end
 local F = {
-    reg   = pickFont(function() return Enum.Font.Montserrat end,        Enum.Font.Gotham),
-    med   = pickFont(function() return Enum.Font.MontserratMedium end,  Enum.Font.GothamMedium),
-    bold  = pickFont(function() return Enum.Font.MontserratBold end,    Enum.Font.GothamBold),
-    black = pickFont(function() return Enum.Font.MontserratBlack end,   Enum.Font.GothamBlack),
+    reg   = pickFont(function() return Enum.Font.BuilderSans end,          Enum.Font.Gotham),
+    med   = pickFont(function() return Enum.Font.BuilderSansMedium end,    Enum.Font.GothamMedium),
+    bold  = pickFont(function() return Enum.Font.BuilderSansBold end,      Enum.Font.GothamBold),
+    black = pickFont(function() return Enum.Font.BuilderSansExtraBold end, Enum.Font.GothamBlack),
 }
 
--- ── Palette (dim, slightly-transparent white — no pink) ──────────
+-- ── Palette (clean dim-white, brighter accent) ──────────────────
 local K = {
-    bg   = Color3.fromRGB(12,12,14),  bg1  = Color3.fromRGB(17,17,20),
-    bg2  = Color3.fromRGB(23,23,27),  bg3  = Color3.fromRGB(31,31,36),
-    bg4  = Color3.fromRGB(42,42,48),
-    line = Color3.fromRGB(46,46,52),  bdr  = Color3.fromRGB(72,72,82),
-    txt  = Color3.fromRGB(232,233,238), txt2 = Color3.fromRGB(165,167,176),
-    txt3 = Color3.fromRGB(94,96,105),
-    acc      = Color3.fromRGB(196,199,208), -- dim white accent
-    accDim   = Color3.fromRGB(150,153,162),
-    accHov   = Color3.fromRGB(222,224,230),
-    accPress = Color3.fromRGB(120,123,132),
-    ok    = Color3.fromRGB(70,190,110), err = Color3.fromRGB(210,80,80),
-    amber = Color3.fromRGB(230,180,70),
-    input = Color3.fromRGB(20,20,24),
+    bg   = Color3.fromRGB(10,10,13),  bg1  = Color3.fromRGB(15,15,19),
+    bg2  = Color3.fromRGB(21,21,26),  bg3  = Color3.fromRGB(30,30,36),
+    bg4  = Color3.fromRGB(42,42,50),
+    line = Color3.fromRGB(48,48,56),  bdr  = Color3.fromRGB(78,78,90),
+    txt  = Color3.fromRGB(238,239,244), txt2 = Color3.fromRGB(170,172,182),
+    txt3 = Color3.fromRGB(98,100,110),
+    acc      = Color3.fromRGB(212,215,224), -- brighter dim-white accent
+    accDim   = Color3.fromRGB(158,161,172),
+    accHov   = Color3.fromRGB(238,240,246),
+    accPress = Color3.fromRGB(128,131,142),
+    ok    = Color3.fromRGB(74,200,118), err = Color3.fromRGB(220,84,84),
+    amber = Color3.fromRGB(236,186,72),
+    input = Color3.fromRGB(18,18,23),
 }
 
 local function mk(c,p) local o=Instance.new(c); if p then o.Parent=p end; return o end
@@ -129,13 +127,14 @@ local lastCapturedCode = nil
 local seenAttempts     = {}
 local autoType         = true
 local autoRedeem       = true     -- INSTA REDEEM toggle (main panel)
-local caseMode         = "UPPER"  -- "UPPER" | "lower" | "BOTH"
+local caseMode         = "EXACT"  -- "UPPER" | "lower" | "EXACT" (as said)
 local wordCount        = 1        -- words to collect per code (1/2/3)
-local rawMode          = false    -- ignore WORDS+CASE; exact word(s) as typed
+local manualMode       = false    -- ignore 1/2/3: press key to start, press again to fire
 local collectBuffer    = {}       -- words gathered since listening started
 local bindKey          = Enum.KeyCode.F
 local rebinding        = false
 local handleAnnouncement          -- forward declaration (assigned later)
+local toggleListen                -- forward declaration (assigned later)
 
 -- wipe any previous build
 for _, n in ipairs({"AnnouncementSniperGUI","AnnouncementSniperWM","AnnouncementSniperCustom","CodeSniperLite","PhiAutotyper"}) do
@@ -417,10 +416,10 @@ CodeBox.FocusLost:Connect(function(enter) if enter then fireCustom() end end)
 local function caseVariants(code)
     if caseMode == "UPPER" then return { code:upper() }
     elseif caseMode == "lower" then return { code:lower() }
-    else return { code:upper(), code:lower() } end
+    else return { code } end                     -- EXACT: exactly as said (e.g. DsD)
 end
 
-local function targetWords() return rawMode and 1 or wordCount end
+local function targetWords() return wordCount end
 local function resetCollect() collectBuffer = {}; seenAttempts = {} end
 
 local function setMonitor(v)
@@ -428,15 +427,17 @@ local function setMonitor(v)
     tw(pill, 0.15, {BackgroundColor3 = v and K.acc or K.txt3})
     tw(pdot, 0.15, {Position = UDim2.new(0, v and 20 or 2, 0.5, -6)}, Enum.EasingStyle.Back)
     tw(monLbl, 0.15, {TextColor3 = v and K.accHov or K.txt2})
-    tw(Main, 0.15, {BackgroundTransparency = v and 0.06 or 0.12})
-    if v then resetCollect(); setCStatus(("listening… 0/%d"):format(targetWords()), "wait")
+    tw(Main, 0.15, {BackgroundTransparency = v and 0.04 or 0.08})
+    if v then
+        resetCollect()
+        if manualMode then setCStatus("listening… press " .. bindKey.Name .. " to fire", "wait")
+        else setCStatus(("listening… 0/%d"):format(targetWords()), "wait") end
     else setCStatus("listen off.", "idle") end
 end
-monBtn.MouseButton1Click:Connect(function() setMonitor(not monitorOn) end)
 
--- redeem an assembled code (RAW = keep exact case; else apply the CASE setting)
+-- redeem an assembled code instantly (applies the CASE setting)
 local function fireAssembled(code)
-    local variants = rawMode and { code } or caseVariants(code)
+    local variants = caseVariants(code)
     if autoType then CodeBox.Text = variants[1] end
     if autoRedeem then
         task.spawn(function()
@@ -448,6 +449,21 @@ local function fireAssembled(code)
         setCStatus("collected: " .. variants[1] .. " — auto-redeem off", "ok")
     end
 end
+
+-- F / pill toggle: start listening; press again stops (manual = fire collected)
+local function stopAndFire()
+    local joined = table.concat(collectBuffer)
+    setMonitor(false)
+    if joined ~= "" then lastCapturedCode = joined; fireAssembled(joined) end
+end
+toggleListen = function()
+    if monitorOn then
+        if manualMode then stopAndFire() else setMonitor(false) end
+    else
+        setMonitor(true)
+    end
+end
+monBtn.MouseButton1Click:Connect(function() toggleListen() end)
 
 -- ══ SETTINGS PANEL ═══════════════════════════════════════════════
 local SW, SH = 220, 224
@@ -530,8 +546,8 @@ local function makeToggleRow(y, text, default, onChange)
     apply()
     b.MouseButton1Click:Connect(function() state = not state; apply(); if onChange then onChange(state) end end)
 end
-makeToggleRow(34, "AUTO TYPE", autoType, function(v) autoType = v end)
-makeToggleRow(68, "RAW WORD",  rawMode,  function(v) rawMode = v; resetCollect() end)
+makeToggleRow(34, "AUTO TYPE", autoType,   function(v) autoType = v end)
+makeToggleRow(68, "MANUAL",    manualMode, function(v) manualMode = v; resetCollect() end)
 
 -- segmented row helper (used for CASE and WORDS)
 local function makeSegRow(y, labelText, opts, default, onChange)
@@ -561,7 +577,7 @@ local function makeSegRow(y, labelText, opts, default, onChange)
     end
     sel(default)
 end
-makeSegRow(102, "CASE",  {"UPPER", "lower", "BOTH"}, caseMode, function(o) caseMode = o end)
+makeSegRow(102, "CASE",  {"UPPER", "lower", "EXACT"}, caseMode, function(o) caseMode = o end)
 makeSegRow(136, "WORDS", {"1", "2", "3"}, tostring(wordCount), function(o)
     wordCount = tonumber(o) or 1
     resetCollect()              -- reset the word buffer when the setting changes
@@ -832,7 +848,7 @@ UserInputService.InputBegan:Connect(function(input, gpe)
     end
     if gpe then return end                       -- ignore while typing in the box
     if input.KeyCode == bindKey then
-        setMonitor(not monitorOn)                -- F arms/disarms listening
+        toggleListen()                           -- start; press again to stop (+ fire in MANUAL)
     end
 end)
 
@@ -845,10 +861,9 @@ local function flashCatch()
     end)
 end
 
--- While listening (armed by F), collect words IN ORDER from each announcement
--- until we reach the target count, then join + insta-redeem. Words may all come
--- from one message ("the FIRST ..." -> theFIRST with WORDS=2) or across several
--- ("octo" .. "1234" -> octo1234). RAW = the first single word, exact case.
+-- While listening, collect words IN ORDER from each announcement. Fixed mode
+-- (WORDS 1/2/3): auto-fires the moment N words are gathered. MANUAL mode:
+-- keeps collecting as long as you listen; press the key again to stop + fire.
 function handleAnnouncement(source, text, ...)
     local stripped = stripRich(tostring(text or "")); if stripped == "" then return end
     local feedChip
@@ -856,22 +871,27 @@ function handleAnnouncement(source, text, ...)
         for _, w in ipairs(tokenize(stripped)) do
             collectBuffer[#collectBuffer + 1] = w
         end
-        local target = targetWords()
-        -- assemble the code-so-far and live-preview it into the CODE box
-        local upto, parts = math.min(#collectBuffer, target), {}
-        for i = 1, upto do parts[i] = collectBuffer[i] end
-        local joined  = table.concat(parts)
-        local preview = rawMode and joined or caseVariants(joined)[1]
-        CodeBox.Text = preview
-        if #collectBuffer >= target then
-            feedChip = preview
-            resetCollect()
-            setMonitor(false)            -- one-shot: stop listening after a code
-            lastCapturedCode = joined
-            flashCatch()
-            fireAssembled(joined)        -- 0-delay redeem (+ both case variants if BOTH)
+        if manualMode then
+            -- collect everything; live-preview the whole buffer, fire on stop (key)
+            local joined = table.concat(collectBuffer)
+            CodeBox.Text = caseVariants(joined)[1]
+            setCStatus(("listening… %d words — press %s to fire"):format(#collectBuffer, bindKey.Name), "wait")
         else
-            setCStatus(("listening… %d/%d  (+%s)"):format(#collectBuffer, target, collectBuffer[#collectBuffer]), "wait")
+            local target = targetWords()
+            local upto, parts = math.min(#collectBuffer, target), {}
+            for i = 1, upto do parts[i] = collectBuffer[i] end
+            local joined  = table.concat(parts)
+            CodeBox.Text = caseVariants(joined)[1]          -- live preview
+            if #collectBuffer >= target then
+                feedChip = caseVariants(joined)[1]
+                resetCollect()
+                setMonitor(false)            -- one-shot: stop after N words
+                lastCapturedCode = joined
+                flashCatch()
+                fireAssembled(joined)        -- 0-delay redeem
+            else
+                setCStatus(("listening… %d/%d  (+%s)"):format(#collectBuffer, target, collectBuffer[#collectBuffer]), "wait")
+            end
         end
     end
     addFeedEntry(stripped, feedChip)              -- live feed: every announcement
@@ -949,42 +969,13 @@ local function markLocked(re, how)
     print("[Phi] Notify locked (" .. how .. ") ->", re.Name)
 end
 
--- primary: find & listen to ONLY the NotificationController remote
+-- find & listen to ONLY the notify remote (nothing else is touched)
 local nr = findNotifyRemote()
 if nr then
     markLocked(nr, "NotificationController")
     nr.OnClientEvent:Connect(function(...) pcall(handleAnnouncement, "NOTIFY", (...)) end)
 else
-    -- fallback (only if debug tools are unavailable): identify by payload shape
-    warn("[Phi] NotificationController scan unavailable — falling back to shape detection.")
-    local POSITIONS = { Top=true, Bottom=true, Center=true, Centre=true, Middle=true,
-                        Left=true, Right=true, TopRight=true, TopLeft=true, BottomRight=true }
-    local function looksLikeAnnouncement(...)
-        local a = table.pack(...)
-        if a.n == 0 or typeof(a[1]) ~= "string" or #a[1] < 3 then return false end
-        local hasSound, hasPos = false, false
-        for i = 2, a.n do
-            local v = a[i]
-            if typeof(v) == "string" then
-                if v:find("Sounds%.") or v:find("rbxassetid") then hasSound = true end
-                if POSITIONS[v] then hasPos = true end
-            end
-        end
-        return hasSound or hasPos
-    end
-    local function hookEvent(re)
-        re.OnClientEvent:Connect(function(...)
-            if NotifyRemote and NotifyRemote ~= re then return end
-            if looksLikeAnnouncement(...) then
-                if not NotifyRemote then markLocked(re, "shape") end
-                pcall(handleAnnouncement, "NOTIFY", (...))
-            end
-        end)
-    end
-    for _, d in ipairs(Net:GetDescendants()) do
-        if d:IsA("RemoteEvent") then hookEvent(d) end
-    end
-    Net.DescendantAdded:Connect(function(d) if d:IsA("RemoteEvent") then hookEvent(d) end end)
+    warn("[Phi] notify remote not found — listening disabled. Re-execute, or run find_remote.lua.")
 end
 
 -- Redeem RemoteFunction — found by its readable name (no hooks, no spam)
@@ -997,6 +988,6 @@ if not RedeemRemote then
 end
 
 setCStatus("press " .. bindKey.Name .. " to listen, or type a code.", "idle")
-print(("[Phi] v15 ready — notify=%s, redeem=%s")
+print(("[Phi] v16 ready — notify=%s, redeem=%s")
     :format(NotifyRemote and NotifyRemote.Name or "NOT FOUND",
             RedeemRemote and RedeemRemote.Name or "learn-on-use"))
