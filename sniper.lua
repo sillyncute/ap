@@ -771,25 +771,43 @@ tInput.Focused:Connect(function() tw(tiStroke, 0.12, {Color = K.acc, Transparenc
 tInput.FocusLost:Connect(function() tw(tiStroke, 0.12, {Color = K.bdr, Transparency = 0.25}) end)
 
 local tSend = mk("TextButton", TestWin)
-tSend.Size = UDim2.new(1, -24, 0, 30); tSend.Position = UDim2.new(0, 12, 1, -38)
+tSend.Size = UDim2.new(0, 152, 0, 30); tSend.Position = UDim2.new(0, 12, 1, -38)
 tSend.BackgroundColor3 = K.acc; tSend.BorderSizePixel = 0
-tSend.Text = "SEND AS ANNOUNCEMENT"; tSend.TextColor3 = Color3.fromRGB(18,18,22)
+tSend.Text = "SEND"; tSend.TextColor3 = Color3.fromRGB(18,18,22)
 tSend.Font = F.black; tSend.TextSize = 11; tSend.AutoButtonColor = false; tSend.ZIndex = 22
 corner(6, tSend); stroke(tSend, K.accHov, 1.2, 0.4)
 tSend.MouseEnter:Connect(function() tw(tSend, 0.08, {BackgroundColor3 = K.accHov}) end)
 tSend.MouseLeave:Connect(function() tw(tSend, 0.08, {BackgroundColor3 = K.acc}) end)
-local function sendTest()
-    local txt = (tInput.Text or ""):gsub("^%s+",""):gsub("%s+$","")
+
+-- TEST CODE: fires a random code announcement so you can test auto-redeem
+local tCode = mk("TextButton", TestWin)
+tCode.Size = UDim2.new(0, 98, 0, 30); tCode.Position = UDim2.new(0, 176, 1, -38)
+tCode.BackgroundColor3 = K.bg3; tCode.BorderSizePixel = 0
+tCode.Text = "TEST CODE"; tCode.TextColor3 = K.txt
+tCode.Font = F.black; tCode.TextSize = 10; tCode.AutoButtonColor = false; tCode.ZIndex = 22
+corner(6, tCode); stroke(tCode, K.bdr, 1.2, 0.2)
+tCode.MouseEnter:Connect(function() tw(tCode, 0.1, {BackgroundColor3 = K.bg4, TextColor3 = K.accHov}) end)
+tCode.MouseLeave:Connect(function() tw(tCode, 0.1, {BackgroundColor3 = K.bg3, TextColor3 = K.txt}) end)
+
+local function fireAnnouncement(txt)
+    txt = (txt or ""):gsub("^%s+",""):gsub("%s+$","")
     if txt == "" then return end
     local re = NotifyRemote or _G.PhiNotifyRemote
     if re and typeof(firesignal) == "function" then
-        -- fire through the REAL remote: real popup + bloop AND Phi's feed
-        firesignal(re.OnClientEvent, txt, 5.5, "Sounds.Sfx.Blop", "Top", 2678001507)
+        firesignal(re.OnClientEvent, txt, 5.5, "Sounds.Sfx.Blop", "Top", 2678001507)  -- real popup + feed
     else
         handleAnnouncement("TEST", txt)          -- fallback: inject directly (no popup)
     end
+end
+local function sendTest()
+    fireAnnouncement(tInput.Text)
     tInput.Text = ""; tInput:CaptureFocus()
 end
+tCode.MouseButton1Click:Connect(function()
+    local code = "TESTCODE" .. tostring(math.random(1000, 9999))
+    addFeedEntry("[test code] " .. code, code)
+    fireAssembled(code)   -- runs the auto-redeem path: INSTA on -> redeems, off -> types
+end)
 tSend.MouseButton1Click:Connect(sendTest)
 tInput.FocusLost:Connect(function(enter) if enter then sendTest() end end)
 
