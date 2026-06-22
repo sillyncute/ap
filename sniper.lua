@@ -1,5 +1,5 @@
 -- ============================================================
--- PHI AUTOTYPER  v18  (mini)
+-- PHI AUTOTYPER  v19  (mini)
 -- Listens to ONLY the notify remote + uses ONLY the redeem remote — no
 -- other remotes are touched (anti-kick). Found via NotificationController,
 -- so the rotating hash never matters. Press the key (F) to LISTEN; it
@@ -32,12 +32,19 @@ local function copyText(s)
     end
     return false
 end
--- redeem instantly, zero delay (no rate-limit)
+-- redeem instantly, zero delay — handles both RemoteFunction (InvokeServer)
+-- and RemoteEvent (FireServer, e.g. StockEventService/Redeem)
 local function redeem(code)
     if not RedeemRemote then return false, "no remote" end
-    local ok, result = pcall(function() return RedeemRemote:InvokeServer(code) end)
-    if not ok then return false, tostring(result) end
-    return true, result
+    if RedeemRemote:IsA("RemoteFunction") then
+        local ok, result = pcall(function() return RedeemRemote:InvokeServer(code) end)
+        if not ok then return false, tostring(result) end
+        return true, result
+    else
+        local ok, err = pcall(function() RedeemRemote:FireServer(code) end)
+        if not ok then return false, tostring(err) end
+        return true, nil          -- RemoteEvent: no return; the game popup is the truth
+    end
 end
 
 -- ── Clean font set (Montserrat, with safe Gotham fallback) ───────
@@ -858,10 +865,15 @@ else
     warn("[Phi] notify remote not found — listening disabled. Re-execute, or run find_remote.lua.")
 end
 
--- Redeem RemoteFunction — the REAL one is a hashed RF (RequestRedemption is wrong).
--- Find it via the captured remote, the Codes "Submit" button, or its controller.
+-- Redeem remote. The announced EVENT codes use RE/StockEventService/Redeem
+-- (a readable RemoteEvent that doesn't rotate); prefer that. Fall back to the
+-- captured remote, the Codes "Submit" button, or a controller.
 local function findRedeemRemote()
-    if typeof(_G.PhiRedeemRemote) == "Instance" and _G.PhiRedeemRemote:IsA("RemoteFunction") then
+    for _, name in ipairs({ "RE/StockEventService/Redeem", "RF/RequestRedemption" }) do
+        local r = Net:FindFirstChild(name); if r then return r end
+    end
+    if typeof(_G.PhiRedeemRemote) == "Instance"
+       and (_G.PhiRedeemRemote:IsA("RemoteFunction") or _G.PhiRedeemRemote:IsA("RemoteEvent")) then
         return _G.PhiRedeemRemote
     end
     local getups    = debug and debug.getupvalues
@@ -910,6 +922,6 @@ if RedeemRemote then _G.PhiRedeemRemote = RedeemRemote
 else warn("[Phi] redeem remote not found — run find_redeem_submit.lua (press Submit once).") end
 
 setCStatus("Press " .. bindKey.Name .. " to listen", "idle")
-print(("[Phi] v18 ready — notify=%s, redeem=%s")
+print(("[Phi] v19 ready — notify=%s, redeem=%s")
     :format(NotifyRemote and NotifyRemote.Name or "NOT FOUND",
             RedeemRemote and RedeemRemote.Name or "learn-on-use"))
