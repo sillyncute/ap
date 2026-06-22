@@ -1,29 +1,38 @@
 -- ============================================================
--- PHI NOTIFY TEST  (word-by-word)
--- Fires FAKE announcements locally through the notify remote so
--- you can test the LISTEN flow:
---   1) load Phi, open the LIVE FEED
---   2) press F (LISTEN turns on), set WORDS to match (e.g. 2 or 3)
---   3) run this script -> it posts the code one word at a time
---   4) watch the status count up (1/N, 2/N...) then insta-redeem
+-- PHI NOTIFY TEST  (real popup)
+-- Fires a FAKE announcement through the ACTUAL notify remote so the
+-- game draws a real popup AND Phi catches it.
+--
+-- It auto-uses the remote Phi locked onto (_G.PhiNotifyRemote), so you
+-- never paste a hash. Just:
+--   1) load Phi
+--   2) make sure it has LOCKED the notify remote (green dot / console
+--      "[Phi] Notify locked ->") — that happens on the first real
+--      announcement. If it hasn't locked yet, wait for one, or set
+--      FALLBACK_NAME below to the locked-remote name.
+--   3) run this — it posts the code word-by-word.
 -- Nothing is sent to the server; this only triggers client handlers.
--- NOTE: the hashed name rotates — paste the CURRENT locked name below.
 -- ============================================================
 
 local RS  = game:GetService("ReplicatedStorage")
 local Net = RS:WaitForChild("Packages"):WaitForChild("Net")
 
--- <<< current locked notify remote name (from "[Phi] Notify locked ->") >>>
-local NAME = "RE/7a01d0e095cd7447090a56f564aa2b6555f95cafba62aa048e1542b4d52d4272"
+-- optional manual fallback (only used if Phi hasn't locked yet) — paste
+-- the name from "[Phi] Notify locked ->", NOT a line from the probe.
+local FALLBACK_NAME = ""
 
--- the words the "owner" will post, one announcement each (joined = the code)
-local WORDS = { "octo", "1234" }       -- e.g. WORDS=2 -> octo1234
+-- the words the "owner" will post, one announcement each (joined = code)
+local WORDS = { "octo", "1234" }       -- WORDS=2 -> octo1234
 local GAP   = 0.8                      -- seconds between each word
 
-local remote = Net:FindFirstChild(NAME)
+-- pick the remote: Phi's locked one first, else the fallback name
+local remote = _G.PhiNotifyRemote
+if not remote and FALLBACK_NAME ~= "" then remote = Net:FindFirstChild(FALLBACK_NAME) end
+
 if not remote then
-    warn("[Test] Remote not found — it probably rotated. Re-run Phi, copy the new")
-    warn("[Test] '[Phi] Notify locked ->' name, and paste it into NAME above.")
+    warn("[Test] No notify remote yet. Load Phi and let it LOCK first")
+    warn("[Test] (green dot / console '[Phi] Notify locked ->'), then re-run.")
+    warn("[Test] Or paste that locked name into FALLBACK_NAME above.")
     return
 end
 if typeof(firesignal) ~= "function" then
@@ -31,8 +40,9 @@ if typeof(firesignal) ~= "function" then
     return
 end
 
+print("[Test] Using remote:", remote.Name)
 print("[Test] Posting code word-by-word:", table.concat(WORDS, " + "), "=", table.concat(WORDS))
-print("[Test] Make sure LISTEN (F) is ON and WORDS = " .. #WORDS)
+print("[Test] Make sure LISTEN is ON and WORDS = " .. #WORDS)
 
 task.spawn(function()
     for i, w in ipairs(WORDS) do
@@ -40,5 +50,5 @@ task.spawn(function()
         print("[Test] posted word " .. i .. "/" .. #WORDS .. ": " .. w)
         task.wait(GAP)
     end
-    print("[Test] done. Phi should have assembled '" .. table.concat(WORDS) .. "' and fired.")
+    print("[Test] done. A popup should have shown for each word.")
 end)

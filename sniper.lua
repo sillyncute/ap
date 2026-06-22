@@ -900,6 +900,7 @@ local function hookEvent(re)
         if looksLikeAnnouncement(...) then
             if not NotifyRemote then
                 NotifyRemote = re
+                _G.PhiNotifyRemote = re                 -- publish for notify_test.lua
                 mark.BackgroundColor3 = K.ok            -- header dot: green = locked
                 fLiveDot.BackgroundColor3 = K.ok        -- feed dot: green = live
                 print("[Phi] Notify locked ->", re.Name)
