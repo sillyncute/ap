@@ -12,11 +12,13 @@ for _, n in ipairs({"AutoBuy"}) do
 end
 
 -- ===== CONFIG =====================================================
-local RANGE       = 18      -- studs; fire any prompt within this of the player
+local RANGE       = 18      -- studs; fire any prompt within this of the player (slider-adjustable)
+local RANGE_MIN   = 4
+local RANGE_MAX   = 80
 local INTERVAL    = 0.08    -- min seconds between firing the SAME prompt
 local RESPECT_MAX = true    -- also obey each prompt's own MaxActivationDistance
 -- Position the anchored panel here (fixed, never moves):
-local ANCHOR_POS  = UDim2.new(0, 28, 0.5, -70)
+local ANCHOR_POS  = UDim2.new(0, 28, 0.5, -78)
 -- ==================================================================
 
 -- ---- prompt firing -------------------------------------------------
@@ -84,7 +86,7 @@ local SG = mk("ScreenGui"); SG.Name = "AutoBuy"
 SG.ResetOnSpawn = false; SG.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 SG.DisplayOrder = 202; SG.IgnoreGuiInset = true; SG.Parent = PG
 
-local PW, PH = 220, 116
+local PW, PH = 220, 150
 local Main = mk("Frame", SG); Main.Name = "Main"
 Main.Size = UDim2.new(0, PW, 0, PH)
 Main.Position = ANCHOR_POS          -- fixed anchor; never changes
@@ -133,8 +135,63 @@ Pip.Size = UDim2.new(0, 14, 0, 14); Pip.AnchorPoint = Vector2.new(0, 0.5)
 Pip.Position = UDim2.new(0, 2, 0.5, 0); Pip.BackgroundColor3 = K.txt2
 Pip.BorderSizePixel = 0; Pip.ZIndex = 14; corner(7, Pip)
 
+-- range slider row
+local SliderLbl = label("RANGE", 10, F.bold, K.txt2, nil, Main)
+SliderLbl.Size = UDim2.new(0.5, 0, 0, 14); SliderLbl.Position = UDim2.new(0, 12, 0, 88); SliderLbl.ZIndex = 12
+local SliderVal = label(tostring(RANGE) .. " studs", 10, F.bold, K.acc, Enum.TextXAlignment.Right, Main)
+SliderVal.Size = UDim2.new(0.5, -12, 0, 14); SliderVal.AnchorPoint = Vector2.new(1, 0)
+SliderVal.Position = UDim2.new(1, -12, 0, 88); SliderVal.ZIndex = 12
+
+local Track = mk("Frame", Main)
+Track.Size = UDim2.new(1, -24, 0, 6); Track.Position = UDim2.new(0, 12, 0, 108)
+Track.BackgroundColor3 = K.bg3; Track.BorderSizePixel = 0; Track.ZIndex = 12
+corner(3, Track); stroke(Track, K.line, 1, 0.4)
+local Fill = mk("Frame", Track)
+Fill.BackgroundColor3 = K.acc; Fill.BorderSizePixel = 0; Fill.ZIndex = 13; corner(3, Fill)
+local Handle = mk("Frame", Track)
+Handle.Size = UDim2.new(0, 14, 0, 14); Handle.AnchorPoint = Vector2.new(0.5, 0.5)
+Handle.BackgroundColor3 = K.txt; Handle.BorderSizePixel = 0; Handle.ZIndex = 14
+corner(7, Handle); stroke(Handle, K.bdr, 1, 0)
+
+local function applySlider(frac)
+    frac = math.clamp(frac, 0, 1)
+    RANGE = math.floor(RANGE_MIN + (RANGE_MAX - RANGE_MIN) * frac + 0.5)
+    SliderVal.Text = RANGE .. " studs"
+    Fill.Size = UDim2.new(frac, 0, 1, 0)
+    Handle.Position = UDim2.new(frac, 0, 0.5, 0)
+end
+applySlider((RANGE - RANGE_MIN) / (RANGE_MAX - RANGE_MIN))
+
+local sliding = false
+local function frameFromX(x)
+    local left = Track.AbsolutePosition.X
+    local w = Track.AbsoluteSize.X
+    if w <= 0 then return end
+    applySlider((x - left) / w)
+end
+Track.InputBegan:Connect(function(i)
+    if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+        sliding = true; frameFromX(i.Position.X)
+    end
+end)
+Handle.InputBegan:Connect(function(i)
+    if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+        sliding = true
+    end
+end)
+UserInputService.InputChanged:Connect(function(i)
+    if sliding and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
+        frameFromX(i.Position.X)
+    end
+end)
+UserInputService.InputEnded:Connect(function(i)
+    if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+        sliding = false
+    end
+end)
+
 local Info = label("0 prompts in range", 9, F.med, K.txt3, nil, Main)
-Info.Size = UDim2.new(1, -24, 0, 14); Info.Position = UDim2.new(0, 12, 0, 90); Info.ZIndex = 12
+Info.Size = UDim2.new(1, -24, 0, 14); Info.Position = UDim2.new(0, 12, 0, 124); Info.ZIndex = 12
 
 -- ---- toggle + loop -------------------------------------------------
 local enabled = false
