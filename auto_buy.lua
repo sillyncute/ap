@@ -17,7 +17,7 @@ local RANGE_MIN   = 4
 local RANGE_MAX   = 80
 local INTERVAL    = 0.08    -- min seconds between firing the SAME prompt
 local RESPECT_MAX = true    -- also obey each prompt's own MaxActivationDistance
--- Position the anchored panel here (fixed, never moves):
+-- Starting position of the panel (draggable from here):
 local ANCHOR_POS  = UDim2.new(0, 28, 0.5, -78)
 -- ==================================================================
 
@@ -112,9 +112,30 @@ mark.BorderSizePixel = 0; mark.ZIndex = 12; corner(5, mark)
 local title = label("AUTO BUY", 13, F.black, K.txt, nil, Head)
 title.Size = UDim2.new(1, -50, 1, 0); title.Position = UDim2.new(0, 32, 0, 0); title.ZIndex = 12
 
+-- anchor (lock position) toggle — a little pin button in the header
+local anchored = false
+local AnchorBtn = mk("TextButton", Head)
+AnchorBtn.Size = UDim2.new(0, 22, 0, 22); AnchorBtn.AnchorPoint = Vector2.new(1, 0.5)
+AnchorBtn.Position = UDim2.new(1, -10, 0.5, 0); AnchorBtn.BackgroundColor3 = K.bg3
+AnchorBtn.Text = "📌"; AnchorBtn.TextColor3 = K.txt2; AnchorBtn.Font = F.bold; AnchorBtn.TextSize = 12
+AnchorBtn.BorderSizePixel = 0; AnchorBtn.AutoButtonColor = false; AnchorBtn.ZIndex = 13
+corner(7, AnchorBtn); local anchorStroke = stroke(AnchorBtn, K.bdr, 1, 0)
+
 local StatLbl = label("idle", 9, F.bold, K.txt3, Enum.TextXAlignment.Right, Head)
-StatLbl.Size = UDim2.new(0, 80, 1, 0); StatLbl.AnchorPoint = Vector2.new(1, 0)
-StatLbl.Position = UDim2.new(1, -14, 0, 0); StatLbl.ZIndex = 12
+StatLbl.Size = UDim2.new(0, 70, 1, 0); StatLbl.AnchorPoint = Vector2.new(1, 0)
+StatLbl.Position = UDim2.new(1, -40, 0, 0); StatLbl.ZIndex = 12
+
+local function setAnchored(on)
+    anchored = on
+    if on then
+        tw(AnchorBtn, 0.12, {BackgroundColor3 = K.acc, TextColor3 = Color3.fromRGB(18,18,22)})
+        tw(anchorStroke, 0.12, {Color = K.acc})
+    else
+        tw(AnchorBtn, 0.12, {BackgroundColor3 = K.bg3, TextColor3 = K.txt2})
+        tw(anchorStroke, 0.12, {Color = K.bdr})
+    end
+end
+AnchorBtn.MouseButton1Click:Connect(function() setAnchored(not anchored) end)
 
 -- toggle row
 local Toggle = mk("TextButton", Main)
@@ -230,7 +251,7 @@ conn = RunService.Heartbeat:Connect(function()
     local inRange = 0
 
     for _, d in ipairs(Workspace:GetDescendants()) do
-        if d:IsA("ProximityPrompt") and d.Enabled then
+        if d:IsA("ProximityPrompt") and d.Enabled and d.KeyboardKeyCode == Enum.KeyCode.E then
             local pos = promptWorldPos(d)
             if pos then
                 local dist = (pos - origin).Magnitude
@@ -253,13 +274,30 @@ SG.Destroying:Connect(function()
     if conn then conn:Disconnect() end
 end)
 
--- block accidental drag / keep it anchored even if something nudges it
-Main:GetPropertyChangedSignal("Position"):Connect(function()
-    if Main.Position ~= ANCHOR_POS then Main.Position = ANCHOR_POS end
-end)
+-- drag the panel by its header (disabled while the anchor toggle is ON)
+do
+    local dragging, dragStart, startPos = false, nil, nil
+    Head.InputBegan:Connect(function(i)
+        if anchored then return end
+        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+            dragging = true; dragStart = i.Position; startPos = Main.Position
+            i.Changed:Connect(function()
+                if i.UserInputState == Enum.UserInputState.End then dragging = false end
+            end)
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(i)
+        if not dragging or anchored then return end
+        if i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch then
+            local d = i.Position - dragStart
+            Main.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X,
+                                      startPos.Y.Scale, startPos.Y.Offset + d.Y)
+        end
+    end)
+end
 
 if not fireprompt then
     StatLbl.Text = "no fireprompt"; StatLbl.TextColor3 = K.err
     warn("[AutoBuy] fireproximityprompt not found — using input-hold fallback (may be slower).")
 end
-print("[AutoBuy] ready. Toggle ON to auto-hold E on every prompt within", RANGE, "studs.")
+print("[AutoBuy] ready. Drag by the header; 📌 locks position. Auto-holds E on E-prompts within", RANGE, "studs.")
